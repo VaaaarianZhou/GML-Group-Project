@@ -10,10 +10,10 @@ def load_csv(filepath):
     df = pd.read_csv(filepath)
     return df
 
-def encode_cell_types(df):
+def encode_cell_types(cell_type_list):
     """Encode cell types into numerical labels."""
     le = LabelEncoder()
-    cell_types = le.fit_transform(df['cell_type_A'])
+    cell_types = le.fit_transform(cell_type_list)
     class_values = np.unique(cell_types)
     return cell_types, class_values
 
@@ -33,7 +33,7 @@ def construct_similarity_adjacency(count_matrix, neighborhood_size = 10, thresho
     edge_index = torch.stack([torch.concat(src), torch.concat(dst)])
     edge_weights = torch.concat(edge_weights)
 
-    return edge_index, edge_weights
+    return edge_index.to(torch.long), edge_weights
 
 def construct_spatial_adjacency(coordinates):
     """
@@ -64,6 +64,7 @@ def construct_spatial_adjacency(coordinates):
     row, col = edges[:, 0], edges[:, 1]
     edge_index = np.stack([row, col])
     edge_weights = torch.ones(len(edges), dtype=torch.float32)
+    edge_index = torch.tensor(edge_index, dtype=torch.long)
 
     return edge_index, edge_weights
 
