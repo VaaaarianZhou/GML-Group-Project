@@ -7,7 +7,10 @@ from sklearn.metrics import classification_report, confusion_matrix, ConfusionMa
 import matplotlib.pyplot as plt
 
 from torch_geometric.data import HeteroData
+from torch_geometric.loader import HGTLoader
 from torch_geometric.nn import HANConv
+from tqdm import tqdm
+import torch.nn.functional as F
 
 # Custom module functions (ensure these are properly defined in your 'data_processing' module)
 from data_processing import (
@@ -23,7 +26,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Load the data
 TRAINING_DATA_PATH = 'data/B004_training_dryad.csv'
 df = load_csv(TRAINING_DATA_PATH)
-
+# print(df.columns)
 # List of genes
 genes = ['MUC2', 'SOX9', 'MUC1', 'CD31', 'Synapto', 'CD49f', 'CD15', 'CHGA', 'CDX2', 'ITLN1',
          'CD4', 'CD127', 'Vimentin', 'HLADR', 'CD8', 'CD11c', 'CD44', 'CD16', 'BCL2', 'CD3',
@@ -35,9 +38,9 @@ df.rename(columns={'Unnamed: 0': 'cell_id'}, inplace=True)
 
 # Randomly select a subset of data
 # random_indices = torch.randint(low=0, high=df.shape[0], size=(10000,)).tolist()
-X = df.loc[genes].values
-y, _ = encode_cell_types(df.loc['cell_type_A'].values.flatten())
-coordinates = df.loc[['x', 'y']].values
+X = df[genes].values
+y, _ = encode_cell_types(df['cell_type_A'].values.flatten())
+coordinates = df[['x', 'y']].values
 
 # Construct adjacency matrices
 sim_edge_index, _ = construct_similarity_adjacency(X)
@@ -63,11 +66,17 @@ perm = torch.randperm(num_nodes)
 train_idx = perm[:num_train]
 test_idx = perm[num_train:]
 
-hetero_data['cell'].train_mask = torch.zeros(num_nodes, dtype=torch.bool)
-hetero_data['cell'].train_mask[train_idx] = True
+train_loader = HGTLoader(hetero_data, num_samples=[1024] * 4, shuffle=True,
+                             input_nodes=train_idx)
+val_loader = HGTLoader(hetero_data, num_samples=[1024] * 4,
+                           input_nodes=test_idx)
 
-hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
-hetero_data['cell'].test_mask[test_idx] = True
+
+# hetero_data['cell'].train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+# hetero_data['cell'].train_mask[train_idx] = True
+
+# hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+# hetero_data['cell'].test_mask[test_idx] = True
 
 # Get metadata
 metadata = hetero_data.metadata()
@@ -107,25 +116,35 @@ print(hetero_data.edge_index_dict)
 
 for epoch in range(1, num_epochs + 1):
     model.train()
-    optimizer.zero_grad()
-    out = model(hetero_data.x_dict, hetero_data.edge_index_dict)
-    loss = criterion(
-        out[hetero_data['cell'].train_mask],
-        hetero_data['cell'].y[hetero_data['cell'].train_mask]
-    )
-    loss.backward()
-    optimizer.step()
-    train_losses.append(loss.item())
 
+    total_examples = total_loss = 0
+    for batch in tqdm(train_loader):
+        optimizer.zero_grad()
+        batch = batch.to(device, 'edge_index')
+        batch_size = batch['cell'].batch_size
+        out = model(batch.x_dict, batch.edge_index_dict)['cell'][:batch_size]
+        loss = F.cross_entropy(out, batch['cell'].y[:batch_size])
+        loss.backward()
+        optimizer.step()
+
+        total_examples += batch_size
+        total_loss += float(loss) * batch_size
+
+    # Validation
     model.eval()
-    with torch.no_grad():
-        out = model(hetero_data.x_dict, hetero_data.edge_index_dict)
-        pred = out.argmax(dim=1)
-        test_correct = pred[hetero_data['cell'].test_mask] == hetero_data['cell'].y[hetero_data['cell'].test_mask]
-        test_acc = int(test_correct.sum()) / int(hetero_data['cell'].test_mask.sum())
-        test_accuracies.append(test_acc)
+    total_examples = total_correct = 0
+    for batch in tqdm(val_loader):
+        batch = batch.to(device, 'edge_index')
+        batch_size = batch['cell'].batch_size
+        out = model(batch.x_dict, batch.edge_index_dict)['cell'][:batch_size]
+        pred = out.argmax(dim=-1)
 
-    print(f'Epoch: {epoch}, Loss: {loss.item():.4f}, Test Accuracy: {test_acc:.4f}')
+        total_examples += batch_size
+        total_correct += int((pred == batch['cell'].y[:batch_size]).sum())
+
+        val_acc = total_correct / total_examples
+
+print(f'Epoch: {epoch}, Loss: {loss.item():.4f}, Test Accuracy: {val_acc:.4f}')
 
 # Plot the training loss curve
 plt.figure(figsize=(10, 5))
