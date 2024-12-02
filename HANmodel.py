@@ -38,9 +38,14 @@ df.rename(columns={'Unnamed: 0': 'cell_id'}, inplace=True)
 
 # Randomly select a subset of data
 # random_indices = torch.randint(low=0, high=df.shape[0], size=(10000,)).tolist()
-X = df[genes].values
-y, _ = encode_cell_types(df['cell_type_A'].values.flatten())
-coordinates = df[['x', 'y']].values
+# X = df[genes].values
+# y, _ = encode_cell_types(df['cell_type_A'].values.flatten())
+# coordinates = df[['x', 'y']].values
+
+random_indices = torch.randint(low=0, high=df.shape[0], size=(10000,)).tolist()
+X = df.loc[random_indices][genes].values
+y, _ = encode_cell_types(df.loc[random_indices]['cell_type_A'].values.flatten())
+coordinates = df.loc[random_indices][['x', 'y']].values
 
 # Construct adjacency matrices
 sim_edge_index, _ = construct_similarity_adjacency(X)
@@ -66,10 +71,16 @@ perm = torch.randperm(num_nodes)
 train_idx = perm[:num_train]
 test_idx = perm[num_train:]
 
+hetero_data['cell'].train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+hetero_data['cell'].train_mask[train_idx] = True
+
+hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+hetero_data['cell'].test_mask[test_idx] = True
+
 train_loader = HGTLoader(hetero_data, num_samples=[1024] * 4, shuffle=True,
-                             input_nodes=train_idx)
+                             input_nodes=('cell', hetero_data['cell'].train_mask))
 val_loader = HGTLoader(hetero_data, num_samples=[1024] * 4,
-                           input_nodes=test_idx)
+                           input_nodes=('cell', hetero_data['cell'].test_mask))
 
 
 # hetero_data['cell'].train_mask = torch.zeros(num_nodes, dtype=torch.bool)
@@ -114,15 +125,16 @@ num_epochs = 200
 
 print(hetero_data.edge_index_dict)
 
-for epoch in range(1, num_epochs + 1):
+for epoch in tqdm(range(1, num_epochs + 1), desc='Epoch'):
     model.train()
 
     total_examples = total_loss = 0
-    for batch in tqdm(train_loader):
+    for batch in train_loader:
         optimizer.zero_grad()
         batch = batch.to(device, 'edge_index')
         batch_size = batch['cell'].batch_size
-        out = model(batch.x_dict, batch.edge_index_dict)['cell'][:batch_size]
+        out = model(batch.x_dict, batch.edge_index_dict)[:batch_size]
+
         loss = F.cross_entropy(out, batch['cell'].y[:batch_size])
         loss.backward()
         optimizer.step()
@@ -136,7 +148,7 @@ for epoch in range(1, num_epochs + 1):
     for batch in tqdm(val_loader):
         batch = batch.to(device, 'edge_index')
         batch_size = batch['cell'].batch_size
-        out = model(batch.x_dict, batch.edge_index_dict)['cell'][:batch_size]
+        out = model(batch.x_dict, batch.edge_index_dict)[:batch_size]
         pred = out.argmax(dim=-1)
 
         total_examples += batch_size
