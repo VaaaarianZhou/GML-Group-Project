@@ -35,10 +35,10 @@ genes = ['MUC2', 'SOX9', 'MUC1', 'CD31', 'Synapto', 'CD49f', 'CD15', 'CHGA', 'CD
 df.rename(columns={'Unnamed: 0': 'cell_id'}, inplace=True)
 
 # Randomly select a subset of data
-random_indices = torch.randint(low=0, high=df.shape[0], size=(10000,)).tolist()
-X = df.loc[random_indices, genes].values
-y, _ = encode_cell_types(df.loc[random_indices, 'cell_type_A'].values.flatten())
-coordinates = df.loc[random_indices, ['x', 'y']].values
+# random_indices = torch.randint(low=0, high=df.shape[0], size=(10000,)).tolist()
+X = df.loc[genes].values
+y, _ = encode_cell_types(df.loc['cell_type_A'].values.flatten())
+coordinates = df.loc[['x', 'y']].values
 
 # Construct adjacency matrices
 sim_edge_index, _ = construct_similarity_adjacency(X)
