@@ -42,10 +42,10 @@ df.rename(columns={'Unnamed: 0': 'cell_id'}, inplace=True)
 # y, _ = encode_cell_types(df['cell_type_A'].values.flatten())
 # coordinates = df[['x', 'y']].values
 
-random_indices = torch.randint(low=0, high=df.shape[0], size=(10000,)).tolist()
-X = df.loc[random_indices][genes].values
-y, _ = encode_cell_types(df.loc[random_indices]['cell_type_A'].values.flatten())
-coordinates = df.loc[random_indices][['x', 'y']].values
+# random_indices = torch.randint(low=0, high=df.shape[0], size=(10000,)).tolist()
+X = df[genes].values
+y, _ = encode_cell_types(df['cell_type_A'].values.flatten())
+coordinates = df.loc[['x', 'y']].values
 
 # Construct adjacency matrices
 sim_edge_index, _ = construct_similarity_adjacency(X)
@@ -77,9 +77,9 @@ hetero_data['cell'].train_mask[train_idx] = True
 hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
 hetero_data['cell'].test_mask[test_idx] = True
 
-train_loader = HGTLoader(hetero_data, num_samples=[1024] * 4, shuffle=True,
+train_loader = HGTLoader(hetero_data, num_samples=[64], shuffle=True, batch_size = 128,
                              input_nodes=('cell', hetero_data['cell'].train_mask))
-val_loader = HGTLoader(hetero_data, num_samples=[1024] * 4,
+val_loader = HGTLoader(hetero_data, num_samples=[64], batch_size = 128,
                            input_nodes=('cell', hetero_data['cell'].test_mask))
 
 
@@ -95,7 +95,7 @@ metadata = hetero_data.metadata()
 
 # Define the HAN model
 class HAN(torch.nn.Module):
-    def __init__(self, metadata, in_channels, out_channels, hidden_channels=64, heads=8):
+    def __init__(self, metadata, in_channels, out_channels, hidden_channels=128, heads=2):
         super().__init__()
         self.conv1 = HANConv(in_channels, hidden_channels, heads=heads, dropout=0.6, metadata=metadata)
         self.conv2 = HANConv(hidden_channels, hidden_channels, heads=heads, dropout=0.6, metadata=metadata)
@@ -112,11 +112,11 @@ class HAN(torch.nn.Module):
 in_channels = hetero_data['cell'].x.size(1)
 num_classes = hetero_data['cell'].y.max().item() + 1
 
-model = HAN(metadata, in_channels, num_classes, hidden_channels=64, heads=8).to(device)
+model = HAN(metadata, in_channels, num_classes, hidden_channels=128, heads=2).to(device)
 
 # Define optimizer and loss function
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=0.001)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=0.001)
 
 # Training loop
 train_losses = []
@@ -138,14 +138,15 @@ for epoch in tqdm(range(1, num_epochs + 1), desc='Epoch'):
         loss = F.cross_entropy(out, batch['cell'].y[:batch_size])
         loss.backward()
         optimizer.step()
-
         total_examples += batch_size
-        total_loss += float(loss) * batch_size
+        total_loss += float(loss.item()) * batch_size
+    train_losses.append(total_loss)
+
 
     # Validation
     model.eval()
     total_examples = total_correct = 0
-    for batch in tqdm(val_loader):
+    for batch in val_loader:
         batch = batch.to(device, 'edge_index')
         batch_size = batch['cell'].batch_size
         out = model(batch.x_dict, batch.edge_index_dict)[:batch_size]
@@ -154,7 +155,8 @@ for epoch in tqdm(range(1, num_epochs + 1), desc='Epoch'):
         total_examples += batch_size
         total_correct += int((pred == batch['cell'].y[:batch_size]).sum())
 
-        val_acc = total_correct / total_examples
+    val_acc = total_correct / total_examples
+    test_accuracies.append(val_acc)
 
 print(f'Epoch: {epoch}, Loss: {loss.item():.4f}, Test Accuracy: {val_acc:.4f}')
 
