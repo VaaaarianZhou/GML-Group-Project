@@ -2,14 +2,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
-
 from torch_geometric.data import HeteroData
-from torch_geometric.nn import RGCNConv
+from torch_geometric.loader import NeighborLoader, HGTLoader
+from torch_geometric.nn import HeteroConv, GCNConv
+from tqdm import tqdm
 
-# Custom module functions (ensure these are properly defined in your 'data_processing' module)
+# Custom module functions
 from data_processing import (
     load_csv,
     encode_cell_types,
@@ -34,52 +34,30 @@ genes = ['MUC2', 'SOX9', 'MUC1', 'CD31', 'Synapto', 'CD49f', 'CD15', 'CHGA', 'CD
 df.rename(columns={'Unnamed: 0': 'cell_id'}, inplace=True)
 
 # Randomly select a subset of data
-# random_indices = torch.randint(low=0, high=df.shape[0], size=(10000,)).tolist()
-X = df.loc[genes].values
-y, _ = encode_cell_types(df.loc['cell_type_A'].values.flatten())
-coordinates = df.loc[['x', 'y']].values
+# random_indices = np.random.choice(df.shape[0], size=10000, replace=False)
+X = df[genes].values
+y, _ = encode_cell_types(df['cell_type_A'].values.flatten())
+coordinates = df[['x', 'y']].values
 
 # Construct adjacency matrices
 sim_edge_index, _ = construct_similarity_adjacency(X)
 spatial_edge_index, _ = construct_spatial_adjacency(coordinates)
 
+print(sim_edge_index)
+
 # Build the heterogeneous graph
 edge_index_dict = {
-    ('cell', 'spatially_close_to', 'cell'): {'edge_index':spatial_edge_index},
-    ('cell', 'similar_to', 'cell'): {'edge_index':sim_edge_index}
+    ('cell', 'spatially_close_to', 'cell'): {'edge_index': spatial_edge_index},
+    ('cell', 'similar_to', 'cell'): {'edge_index': sim_edge_index}
 }
 
 hetero_data = HeteroData(edge_index_dict)
-hetero_data['cell'].x = torch.tensor(X, device=device, dtype=torch.float)
-hetero_data['cell'].y = torch.tensor(y, device=device, dtype=torch.long)
-# hetero_data.edge_index_dict = edge_index_dict
+hetero_data['cell'].x = torch.tensor(X, dtype=torch.float)
+hetero_data['cell'].y = torch.tensor(y, dtype=torch.long)
 
-# Convert to homogeneous graph with edge types for RGCN
-from torch_geometric.data import Data
-
-# Combine all edge indices and assign relation types
-edge_types = []
-edge_indices = []
-edge_type_dict = {('cell', 'spatially_close_to', 'cell'): 0,
-                  ('cell', 'similar_to', 'cell'): 1}
-
-for edge_type, edge_index in hetero_data.edge_index_dict.items():
-    edge_indices.append(edge_index)
-    edge_types.append(torch.full((edge_index.size(1),), edge_type_dict[edge_type], dtype=torch.long))
-
-edge_index = torch.cat(edge_indices, dim=1)
-edge_type = torch.cat(edge_types, dim=0)
-
-# Create a homogeneous Data object
-data = Data(
-    x=hetero_data['cell'].x,
-    y=hetero_data['cell'].y,
-    edge_index=edge_index,
-    edge_type=edge_type
-).to(device)
 
 # Assign train and test masks
-num_nodes = data.num_nodes
+num_nodes = hetero_data['cell'].num_nodes
 train_ratio = 0.8
 num_train = int(num_nodes * train_ratio)
 
@@ -87,35 +65,41 @@ perm = torch.randperm(num_nodes)
 train_idx = perm[:num_train]
 test_idx = perm[num_train:]
 
-data.train_mask = torch.zeros(num_nodes, dtype=torch.bool)
-data.train_mask[train_idx] = True
+hetero_data['cell'].train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+hetero_data['cell'].train_mask[train_idx] = True
 
-data.test_mask = torch.zeros(num_nodes, dtype=torch.bool)
-data.test_mask[test_idx] = True
+hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+hetero_data['cell'].test_mask[test_idx] = True
 
-# Define the RGCN model
-class RGCN(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_relations, num_layers=2):
+train_loader = HGTLoader(hetero_data, num_samples=[64], shuffle=True, batch_size = 128,
+                         input_nodes=('cell', hetero_data['cell'].train_mask))
+val_loader = HGTLoader(hetero_data, num_samples=[64], batch_size = 128,
+                           input_nodes=('cell', hetero_data['cell'].test_mask))
+
+# Define the Heterogeneous RGCN model
+class HeteroRGCN(torch.nn.Module):
+    def __init__(self, hidden_channels, out_channels):
         super().__init__()
-        self.convs = torch.nn.ModuleList()
-        self.convs.append(RGCNConv(in_channels, hidden_channels, num_relations))
-        for _ in range(num_layers - 2):
-            self.convs.append(RGCNConv(hidden_channels, hidden_channels, num_relations))
-        self.convs.append(RGCNConv(hidden_channels, out_channels, num_relations))
+        self.conv1 = HeteroConv({
+            ('cell', 'spatially_close_to', 'cell'): GCNConv(-1, hidden_channels),
+            ('cell', 'similar_to', 'cell'): GCNConv(-1, hidden_channels),
+        }, aggr='mean')
 
-    def forward(self, x, edge_index, edge_type):
-        for conv in self.convs[:-1]:
-            x = conv(x, edge_index, edge_type)
-            x = torch.relu(x)
-        x = self.convs[-1](x, edge_index, edge_type)
-        return x
+        self.conv2 = HeteroConv({
+            ('cell', 'spatially_close_to', 'cell'): GCNConv(hidden_channels, out_channels),
+            ('cell', 'similar_to', 'cell'): GCNConv(hidden_channels, out_channels),
+        }, aggr='mean')
 
-in_channels = data.x.size(1)
+    def forward(self, x_dict, edge_index_dict):
+        x_dict = self.conv1(x_dict, edge_index_dict)
+        x_dict = {key: x.relu() for key, x in x_dict.items()}
+        x_dict = self.conv2(x_dict, edge_index_dict)
+        return x_dict
+
 hidden_channels = 64
-out_channels = data.y.max().item() + 1
-num_relations = len(edge_type_dict)
+out_channels = hetero_data['cell'].y.max().item() + 1
 
-model = RGCN(in_channels, hidden_channels, out_channels, num_relations).to(device)
+model = HeteroRGCN(hidden_channels, out_channels).to(device)
 
 # Define optimizer and loss function
 criterion = nn.CrossEntropyLoss()
@@ -128,22 +112,37 @@ num_epochs = 20
 
 for epoch in range(1, num_epochs + 1):
     model.train()
-    optimizer.zero_grad()
-    out = model(data.x, data.edge_index, data.edge_type)
-    loss = criterion(out[data.train_mask], data.y[data.train_mask])
-    loss.backward()
-    optimizer.step()
-    train_losses.append(loss.item())
+    total_loss = 0
+    for batch in tqdm(train_loader):
+        batch = batch.to(device)
+        optimizer.zero_grad()
+        out = model(batch.x_dict, batch.edge_index_dict)
+        out = out['cell']
+        y = batch['cell'].y
+        loss = criterion(out, y)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
 
+    avg_loss = total_loss / len(train_loader)
+    train_losses.append(avg_loss)
+
+    # Validation
     model.eval()
+    correct = total = 0
     with torch.no_grad():
-        out = model(data.x, data.edge_index, data.edge_type)
-        pred = out.argmax(dim=1)
-        test_correct = pred[data.test_mask] == data.y[data.test_mask]
-        test_acc = int(test_correct.sum()) / int(data.test_mask.sum())
-        test_accuracies.append(test_acc)
+        for batch in val_loader:
+            batch = batch.to(device)
+            out = model(batch.x_dict, batch.edge_index_dict)
+            preds = out['cell'].argmax(dim=1)
+            labels = batch['cell'].y
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
 
-    print(f'Epoch: {epoch}, Loss: {loss.item():.4f}, Test Accuracy: {test_acc:.4f}')
+    val_acc = correct / total
+    test_accuracies.append(val_acc)
+
+    print(f'Epoch: {epoch}, Loss: {avg_loss:.4f}, Test Accuracy: {val_acc:.4f}')
 
 # Plot the training loss curve
 plt.figure(figsize=(10, 5))
@@ -163,13 +162,28 @@ plt.title('Test Accuracy over Epochs')
 plt.legend()
 plt.show()
 
-# Evaluate the model
+# Final Evaluation on Test Set
+test_loader = NeighborLoader(
+    hetero_data,
+    num_neighbors={key: [-1] for key in hetero_data.edge_types},
+    batch_size=128,
+    input_nodes=('cell', hetero_data['cell'].test_mask),
+)
+
 model.eval()
+all_preds = []
+all_labels = []
 with torch.no_grad():
-    out = model(data.x, data.edge_index, data.edge_type)
-    pred = out.argmax(dim=1)
-    y_pred = pred[data.test_mask].cpu().numpy()
-    y_true = data.y[data.test_mask].cpu().numpy()
+    for batch in test_loader:
+        batch = batch.to(device)
+        out = model(batch.x_dict, batch.edge_index_dict)
+        preds = out['cell'].argmax(dim=1)
+        labels = batch['cell'].y
+        all_preds.append(preds.cpu())
+        all_labels.append(labels.cpu())
+
+y_pred = torch.cat(all_preds).numpy()
+y_true = torch.cat(all_labels).numpy()
 
 # Compute and plot the confusion matrix
 cm = confusion_matrix(y_true, y_pred)
