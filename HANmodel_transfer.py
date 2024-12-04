@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import os
 
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
@@ -174,7 +175,7 @@ plt.legend()
 plt.show()
 
 # Load the model's state dictionary on CPU
-torch.save(model.state_dict(), '/model/HAN_model_weights.pth')
+torch.save(model.state_dict(), os.path.join(os.getcwd(), 'model/HAN_model_weights.pth'))
 
 # Evaluate the model
 model.eval()
