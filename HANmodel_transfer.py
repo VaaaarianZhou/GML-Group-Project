@@ -11,7 +11,7 @@ from torch_geometric.loader import HGTLoader
 from torch_geometric.nn import HANConv
 from tqdm import tqdm
 import torch.nn.functional as F
-from utils import load_hubmap_data
+from utils import load_hubmap_data, visualize_predictions
 
 # Custom module functions (ensure these are properly defined in your 'data_processing' module)
 from data_processing import (
@@ -25,10 +25,11 @@ ANNOTATED_DATA = 'data/B004_training_dryad.csv'
 UNANNOTATED_DATA = 'data/B0056_unnanotated_dryad.csv'
 dist_threshold = 30
 neighborhood_size_threshold = 10
-sample_rate = .8
+sample_rate = .01
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+torch.cuda.empty_cache()
 
 # Load train and test data
 train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict = load_hubmap_data(ANNOTATED_DATA, UNANNOTATED_DATA, dist_threshold, neighborhood_size_threshold, sample_rate)
@@ -177,7 +178,8 @@ model.eval()
 with torch.no_grad():
     out = model(test_hetero_data.x_dict, test_hetero_data.edge_index_dict)
     pred = out.argmax(dim=1)
-    y_pred = pred[test_hetero_data['cell']].cpu().numpy()
+    y_pred = pred.cpu().numpy()
+    visualize_predictions(test_X, y_pred, inverse_dict)
     # y_true = test_hetero_data['cell'].y[test_hetero_data['cell'].test_mask].cpu().numpy()
 
 # Compute and plot the confusion matrix

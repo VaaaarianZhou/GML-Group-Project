@@ -5,6 +5,9 @@ from torch_geometric.data import InMemoryDataset, Data
 from sklearn.metrics import pairwise_distances
 import pandas as pd
 from sklearn.preprocessing import normalize, LabelEncoder
+import umap
+import matplotlib.pyplot as plt
+
 
 genes = ['MUC2', 'SOX9', 'MUC1', 'CD31', 'Synapto', 'CD49f',
        'CD15', 'CHGA', 'CDX2', 'ITLN1', 'CD4', 'CD127', 'Vimentin', 'HLADR',
@@ -103,6 +106,36 @@ def load_tonsilbe_data(filename, distance_thres, sample_rate):
     labeled_spatial_edges, labeled_similarity_edges = get_tonsilbe_edge_index(labeled_pos, distance_thres)
     unlabeled_spatial_edges, unlabeled_similarity_edges = get_tonsilbe_edge_index(unlabeled_pos, distance_thres)
     return train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
+
+
+def visualize_predictions(X, predicted_labels, inverse_dict):
+    # Map numerical labels to their string annotations
+    predicted_annotations = [inverse_dict[label] for label in predicted_labels]
+
+    # Compute UMAP coordinates
+    umap_model = umap.UMAP(n_neighbors=15, min_dist=0.1, random_state=42)
+    umap_coordinates = umap_model.fit_transform(X)
+
+    # Create a DataFrame for easier plotting
+    df = pd.DataFrame({
+        'UMAP1': umap_coordinates[:, 0],
+        'UMAP2': umap_coordinates[:, 1],
+        'Cell Type': predicted_annotations
+    })
+
+    # Plot the UMAP with cell type annotations
+    plt.figure(figsize=(10, 8))
+    for cell_type in df['Cell Type'].unique():
+        subset = df[df['Cell Type'] == cell_type]
+        plt.scatter(subset['UMAP1'], subset['UMAP2'], label=cell_type, alpha=0.7, s=20)
+
+    plt.title('UMAP Visualization of Predicted Cell Types')
+    plt.xlabel('UMAP1')
+    plt.ylabel('UMAP2')
+    plt.legend(title='Cell Type', loc='best', bbox_to_anchor=(1.05, 1), fontsize='small')
+    plt.tight_layout()
+    plt.show()
+
 
 class GraphDataset(InMemoryDataset):
 
