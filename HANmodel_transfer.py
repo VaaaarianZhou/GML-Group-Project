@@ -82,9 +82,9 @@ train_hetero_data['cell'].train_mask[train_idx] = True
 train_hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
 train_hetero_data['cell'].test_mask[val_idx] = True
 
-train_loader = HGTLoader(train_hetero_data, num_samples=[512]*4, shuffle=True, batch_size = 512,
+train_loader = HGTLoader(train_hetero_data, num_samples=[512], shuffle=True, batch_size = 512,
                              input_nodes=('cell', train_hetero_data['cell'].train_mask))
-val_loader = HGTLoader(train_hetero_data, num_samples=[512]*4, batch_size = 512,
+val_loader = HGTLoader(train_hetero_data, num_samples=[512], batch_size = 512,
                            input_nodes=('cell', train_hetero_data['cell'].test_mask))
 
 # Get metadata
