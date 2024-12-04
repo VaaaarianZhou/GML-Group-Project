@@ -114,7 +114,7 @@ def visualize_predictions(X, predicted_labels, inverse_dict):
 
     # Compute UMAP coordinates
     umap_model = umap.UMAP(n_neighbors=15, min_dist=0.1, random_state=42)
-    umap_coordinates = umap_model.fit_transform(X)
+    umap_coordinates = umap_model.fit_transform(X.cpu().numpy())
 
     # Create a DataFrame for easier plotting
     df = pd.DataFrame({
