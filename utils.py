@@ -134,7 +134,7 @@ def visualize_predictions(X, predicted_labels, inverse_dict):
     plt.ylabel('UMAP2')
     plt.legend(title='Cell Type', loc='best', bbox_to_anchor=(1.05, 1), fontsize='small')
     plt.tight_layout()
-    plt.show()
+    plt.savefig('UMAP_Visualization_of_HAN_prediction.png')
 
 
 class GraphDataset(InMemoryDataset):
