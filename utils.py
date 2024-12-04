@@ -1,3 +1,12 @@
+import pip
+def install_if_not_exist(package):
+    try:
+        __import__(package)
+    except ImportError:
+        pip.main(['install', package])
+        __import__(package)
+
+install_if_not_exist('umap')
 import torch
 import numpy as np
 from builtins import range
@@ -5,7 +14,7 @@ from torch_geometric.data import InMemoryDataset, Data
 from sklearn.metrics import pairwise_distances
 import pandas as pd
 from sklearn.preprocessing import normalize, LabelEncoder
-import umap
+# import umap
 import matplotlib.pyplot as plt
 
 
@@ -114,7 +123,7 @@ def visualize_predictions(X, predicted_labels, inverse_dict):
 
     # Compute UMAP coordinates
     umap_model = umap.UMAP(n_neighbors=15, min_dist=0.1, random_state=42)
-    umap_coordinates = umap_model.fit_transform(X.cpu().numpy())
+    umap_coordinates = umap_model.fit_transform(X)
 
     # Create a DataFrame for easier plotting
     df = pd.DataFrame({
@@ -135,6 +144,7 @@ def visualize_predictions(X, predicted_labels, inverse_dict):
     plt.legend(title='Cell Type', loc='best', bbox_to_anchor=(1.05, 1), fontsize='small')
     plt.tight_layout()
     plt.savefig('UMAP_Visualization_of_HAN_prediction.png')
+    # plt.show()
 
 
 class GraphDataset(InMemoryDataset):

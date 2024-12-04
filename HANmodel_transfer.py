@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import os
 
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
@@ -25,8 +24,8 @@ from data_processing import (
 ANNOTATED_DATA = 'data/B004_training_dryad.csv'
 UNANNOTATED_DATA = 'data/B0056_unnanotated_dryad.csv'
 dist_threshold = 30
-neighborhood_size_threshold = 20
-sample_rate = 1
+neighborhood_size_threshold = 10
+sample_rate = .01
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -82,9 +81,9 @@ train_hetero_data['cell'].train_mask[train_idx] = True
 train_hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
 train_hetero_data['cell'].test_mask[val_idx] = True
 
-train_loader = HGTLoader(train_hetero_data, num_samples=[512], shuffle=True, batch_size = 512,
+train_loader = HGTLoader(train_hetero_data, num_samples=[64], shuffle=True, batch_size = 128,
                              input_nodes=('cell', train_hetero_data['cell'].train_mask))
-val_loader = HGTLoader(train_hetero_data, num_samples=[512], batch_size = 512,
+val_loader = HGTLoader(train_hetero_data, num_samples=[64], batch_size = 128,
                            input_nodes=('cell', train_hetero_data['cell'].test_mask))
 
 # Get metadata
@@ -109,7 +108,8 @@ class HAN(torch.nn.Module):
 in_channels = train_hetero_data['cell'].x.size(1)
 num_classes = train_hetero_data['cell'].y.max().item() + 1
 
-model = HAN(metadata, in_channels, num_classes, hidden_channels=128, heads=4).to(device)
+model = HAN(metadata, in_channels, num_classes, hidden_channels=128, heads=2).to(device)
+
 
 # Define optimizer and loss function
 criterion = nn.CrossEntropyLoss()
@@ -175,7 +175,8 @@ plt.legend()
 plt.show()
 
 # Load the model's state dictionary on CPU
-torch.save(model.state_dict(), os.path.join(os.getcwd(), 'model/HAN_model_weights.pth'))
+torch.save(model.state_dict(), '/model/HAN_model_weights.pth')
+
 
 # Evaluate the model
 model.eval()
