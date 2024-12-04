@@ -4,7 +4,7 @@ def install_if_not_exist(package):
         __import__(package)
     except ImportError:
         pip.main(['install', package])
-        __import__(package)
+
 
 install_if_not_exist('umap')
 import torch
@@ -14,7 +14,7 @@ from torch_geometric.data import InMemoryDataset, Data
 from sklearn.metrics import pairwise_distances
 import pandas as pd
 from sklearn.preprocessing import normalize, LabelEncoder
-# import umap
+import umap
 import matplotlib.pyplot as plt
 
 
@@ -117,7 +117,7 @@ def load_tonsilbe_data(filename, distance_thres, sample_rate):
     return train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
 
 
-def visualize_predictions(X, predicted_labels, inverse_dict):
+def visualize_predictions(X, predicted_labels, inverse_dict, save_location):
     # Map numerical labels to their string annotations
     predicted_annotations = [inverse_dict[label] for label in predicted_labels]
 
@@ -143,7 +143,7 @@ def visualize_predictions(X, predicted_labels, inverse_dict):
     plt.ylabel('UMAP2')
     plt.legend(title='Cell Type', loc='best', bbox_to_anchor=(1.05, 1), fontsize='small')
     plt.tight_layout()
-    plt.savefig('UMAP_Visualization_of_HAN_prediction.png')
+    plt.savefig(save_location)
     # plt.show()
 
 

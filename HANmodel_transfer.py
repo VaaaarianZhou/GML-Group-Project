@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -21,8 +23,18 @@ from data_processing import (
     construct_spatial_adjacency
 )
 
-ANNOTATED_DATA = 'data/B004_training_dryad.csv'
-UNANNOTATED_DATA = 'data/B0056_unnanotated_dryad.csv'
+project_dir = os.environ.get('PROJECT', os.curdir)
+
+ANNOTATED_DATA = os.path.join(project_dir, 'data/B004_training_dryad.csv')
+UNANNOTATED_DATA = os.path.join(project_dir, 'data/B0056_unnanotated_dryad.csv')
+MODEL_PATH = os.path.join(project_dir, 'model')
+IMAGE_PATH = os.path.join(project_dir, 'image')
+
+if not os.path.exists(MODEL_PATH):
+    os.mkdir(MODEL_PATH)
+if os.path.exists(MODEL_PATH):
+    os.mkdir(IMAGE_PATH)
+
 dist_threshold = 30
 neighborhood_size_threshold = 10
 sample_rate = .01
@@ -174,8 +186,10 @@ plt.title('Test Accuracy over Epochs')
 plt.legend()
 plt.show()
 
+
+
 # Load the model's state dictionary on CPU
-torch.save(model.state_dict(), '/model/HAN_model_weights.pth')
+torch.save(model.state_dict(), os.path.join(MODEL_PATH, 'HAN_model_weights.pth'))
 
 
 # Evaluate the model
@@ -184,7 +198,7 @@ with torch.no_grad():
     out = model(test_hetero_data.x_dict, test_hetero_data.edge_index_dict)
     pred = out.argmax(dim=1)
     y_pred = pred.cpu().numpy()
-    visualize_predictions(test_X, y_pred, inverse_dict)
+    visualize_predictions(test_X, y_pred, inverse_dict, os.path.join(IMAGE_PATH, 'UMAP_HAN_Model.png'))
     # y_true = test_hetero_data['cell'].y[test_hetero_data['cell'].test_mask].cpu().numpy()
 
 # Compute and plot the confusion matrix
