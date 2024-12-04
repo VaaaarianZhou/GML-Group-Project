@@ -25,7 +25,7 @@ ANNOTATED_DATA = 'data/B004_training_dryad.csv'
 UNANNOTATED_DATA = 'data/B0056_unnanotated_dryad.csv'
 dist_threshold = 30
 neighborhood_size_threshold = 10
-sample_rate = .05
+sample_rate = .8
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -56,12 +56,12 @@ test_edge_index_dict = {
 
 # Define training dataset
 train_hetero_data = HeteroData(train_edge_index_dict)
-train_hetero_data['cell'].x = torch.tensor(train_X, device=device, dtype=torch.float)
-train_hetero_data['cell'].y = torch.tensor(train_y, device=device, dtype=torch.long)
+train_hetero_data['cell'].x = train_X
+train_hetero_data['cell'].y = train_y
 
 # Define test dataset
 test_hetero_data = HeteroData(test_edge_index_dict)
-test_hetero_data['cell'].x = torch.tensor(train_X, device=device, dtype=torch.float)
+test_hetero_data['cell'].x = test_X
 
 
 ''' Training HAN model'''
@@ -72,13 +72,13 @@ num_train = int(num_nodes * train_ratio)
 
 perm = torch.randperm(num_nodes)
 train_idx = perm[:num_train]
-test_idx = perm[num_train:]
+val_idx = perm[num_train:]
 
 train_hetero_data['cell'].train_mask = torch.zeros(num_nodes, dtype=torch.bool)
 train_hetero_data['cell'].train_mask[train_idx] = True
 
 train_hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
-train_hetero_data['cell'].test_mask[test_idx] = True
+train_hetero_data['cell'].test_mask[val_idx] = True
 
 train_loader = HGTLoader(train_hetero_data, num_samples=[64], shuffle=True, batch_size = 128,
                              input_nodes=('cell', train_hetero_data['cell'].train_mask))
