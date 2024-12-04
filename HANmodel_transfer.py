@@ -173,6 +173,9 @@ plt.title('Test Accuracy over Epochs')
 plt.legend()
 plt.show()
 
+# Load the model's state dictionary on CPU
+torch.save(model.state_dict(), '/model/HAN_model_weights.pth')
+
 # Evaluate the model
 model.eval()
 with torch.no_grad():
