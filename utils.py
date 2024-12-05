@@ -51,8 +51,8 @@ def get_hubmap_edge_index(X, pos, regions, distance_thres, neighborhood_size_thr
             scores = row @ X_region.T
             neighbors = scores.argsort()[-neighborhood_size_thres:]
             # src.append(np.full((neighborhood_size_thres,), idx))
-            src.extend([idx]*neighborhood_size_thres)
-            dst.extend(neighbors)
+            src.extend([locs[idx]]*neighborhood_size_thres)
+            dst.extend([locs[n] for n in neighbors])
         # similarity_edge_index = np.stack([np.concatenate(src), np.concatenate(dst)])
         # edge_weights = torch.concat(edge_weights)
 
