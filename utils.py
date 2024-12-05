@@ -73,8 +73,8 @@ def load_hubmap_data(labeled_file, unlabeled_file, distance_thres, neighborhood_
     test_df = pd.read_csv(unlabeled_file)
     train_df = train_df.sample(n=round(sample_rate*len(train_df)), random_state=1)
     test_df = test_df.sample(n=round(sample_rate*len(test_df)), random_state=1)
-    train_df = train_df.loc[np.logical_and(train_df['tissue'] == 'CL', train_df['donor'] == 'B004')]
-    test_df = test_df.loc[np.logical_and(test_df['tissue'] == 'CL', test_df['donor'] == 'B005')]
+    train_df = train_df[(train_df['tissue'] == 'CL') & (train_df['donor'] == 'B004')]
+    test_df = test_df[(test_df['tissue'] == 'CL') & (test_df['donor'] == 'B005')]
     train_X = train_df.iloc[:, 1:49].to_numpy() # node features, indexes depend on specific datasets
     train_X = normalize(train_X)
     test_X = test_df.iloc[:, 1:49].to_numpy()
