@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -8,74 +10,88 @@ from torch_geometric.data import HeteroData
 from torch_geometric.loader import NeighborLoader, HGTLoader
 from torch_geometric.nn import HeteroConv, GCNConv
 from tqdm import tqdm
+import os
+from utils import load_hubmap_data, visualize_predictions
 
-# Custom module functions
-from data_processing import (
-    load_csv,
-    encode_cell_types,
-    construct_similarity_adjacency,
-    construct_spatial_adjacency
-)
+project_dir = os.environ.get('PROJECT', os.curdir)
+
+ANNOTATED_DATA = os.path.join(project_dir, 'data/B004_training_dryad.csv')
+UNANNOTATED_DATA = os.path.join(project_dir, 'data/B0056_unnanotated_dryad.csv')
+MODEL_PATH = os.path.join(project_dir, 'model')
+IMAGE_PATH = os.path.join(project_dir, 'image')
+RESULT_PATH = os.path.join(project_dir, 'result')
+
+if not os.path.exists(MODEL_PATH):
+    os.mkdir(MODEL_PATH)
+if not os.path.exists(IMAGE_PATH):
+    os.mkdir(IMAGE_PATH)
+if not os.path.exists(RESULT_PATH):
+    os.mkdir(RESULT_PATH)
+
+dist_threshold = 30
+neighborhood_size_threshold = 10
+sample_rate = .01
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+torch.cuda.empty_cache()
 
-# Load the data
-TRAINING_DATA_PATH = 'data/B004_training_dryad.csv'
-df = load_csv(TRAINING_DATA_PATH)
+# Load train and test data
+train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict = load_hubmap_data(ANNOTATED_DATA, UNANNOTATED_DATA, dist_threshold, neighborhood_size_threshold, sample_rate)
 
-# List of genes
-genes = ['MUC2', 'SOX9', 'MUC1', 'CD31', 'Synapto', 'CD49f', 'CD15', 'CHGA', 'CDX2', 'ITLN1',
-         'CD4', 'CD127', 'Vimentin', 'HLADR', 'CD8', 'CD11c', 'CD44', 'CD16', 'BCL2', 'CD3',
-         'CD123', 'CD38', 'CD90', 'aSMA', 'CD21', 'NKG2D', 'CD66', 'CD57', 'CD206', 'CD68',
-         'CD34', 'aDef5', 'CD7', 'CD36', 'CD138', 'CD45RO', 'Cytokeratin', 'CK7', 'CD117',
-         'CD19', 'Podoplanin', 'CD45', 'CD56', 'CD69', 'Ki67', 'CD49a', 'CD163', 'CD161']
+# Convert them into torch.tensor
+train_X = torch.tensor(train_X, device=device, dtype = torch.float)
+train_y = torch.tensor(train_y, device=device, dtype = torch.long)
+test_X = torch.tensor(test_X, device=device, dtype = torch.float)
+labeled_spatial_edges = torch.tensor(labeled_spatial_edges, device=device, dtype = torch.long).T
+unlabeled_spatial_edges = torch.tensor(unlabeled_spatial_edges, device=device, dtype = torch.long).T
+labelled_similarity_edges = torch.tensor(labeled_similarity_edges, device=device, dtype = torch.long).T
+unlabelled_similarity_edges = torch.tensor(unlabeled_similarity_edges, device=device, dtype = torch.long).T
 
-df.rename(columns={'Unnamed: 0': 'cell_id'}, inplace=True)
-
-# Randomly select a subset of data
-# random_indices = np.random.choice(df.shape[0], size=10000, replace=False)
-X = df[genes].values
-y, _ = encode_cell_types(df['cell_type_A'].values.flatten())
-coordinates = df[['x', 'y']].values
-
-# Construct adjacency matrices
-sim_edge_index, _ = construct_similarity_adjacency(X)
-spatial_edge_index, _ = construct_spatial_adjacency(coordinates)
-
-print(sim_edge_index)
 
 # Build the heterogeneous graph
-edge_index_dict = {
-    ('cell', 'spatially_close_to', 'cell'): {'edge_index': spatial_edge_index},
-    ('cell', 'similar_to', 'cell'): {'edge_index': sim_edge_index}
+train_edge_index_dict = {
+    ('cell', 'spatially_close_to', 'cell'): {'edge_index': labeled_spatial_edges},
+    ('cell', 'similar_to', 'cell'): {'edge_index' : labelled_similarity_edges}
 }
 
-hetero_data = HeteroData(edge_index_dict)
-hetero_data['cell'].x = torch.tensor(X, dtype=torch.float)
-hetero_data['cell'].y = torch.tensor(y, dtype=torch.long)
+test_edge_index_dict = {
+    ('cell', 'spatially_close_to', 'cell'): {'edge_index': unlabeled_spatial_edges},
+    ('cell', 'similar_to', 'cell'): {'edge_index' :unlabelled_similarity_edges}
+}
 
+# Define training dataset
+train_hetero_data = HeteroData(train_edge_index_dict)
+train_hetero_data['cell'].x = train_X
+train_hetero_data['cell'].y = train_y
 
-# Assign train and test masks
-num_nodes = hetero_data['cell'].num_nodes
+# Define test dataset
+test_hetero_data = HeteroData(test_edge_index_dict)
+test_hetero_data['cell'].x = test_X
+
+''' Training RGCN model'''
+# Assign train and validation masks
+num_nodes = train_hetero_data['cell'].num_nodes
 train_ratio = 0.8
 num_train = int(num_nodes * train_ratio)
 
 perm = torch.randperm(num_nodes)
 train_idx = perm[:num_train]
-test_idx = perm[num_train:]
+val_idx = perm[num_train:]
 
-hetero_data['cell'].train_mask = torch.zeros(num_nodes, dtype=torch.bool)
-hetero_data['cell'].train_mask[train_idx] = True
+train_hetero_data['cell'].train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+train_hetero_data['cell'].train_mask[train_idx] = True
 
-hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
-hetero_data['cell'].test_mask[test_idx] = True
+train_hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+train_hetero_data['cell'].test_mask[val_idx] = True
 
-train_loader = HGTLoader(hetero_data, num_samples=[64], shuffle=True, batch_size = 128,
-                         input_nodes=('cell', hetero_data['cell'].train_mask))
-val_loader = HGTLoader(hetero_data, num_samples=[64], batch_size = 128,
-                           input_nodes=('cell', hetero_data['cell'].test_mask))
+train_loader = HGTLoader(train_hetero_data, num_samples=[64], shuffle=True, batch_size = 128,
+                             input_nodes=('cell', train_hetero_data['cell'].train_mask))
+val_loader = HGTLoader(train_hetero_data, num_samples=[64], batch_size = 128,
+                           input_nodes=('cell', train_hetero_data['cell'].test_mask))
 
+# Get metadata
+metadata = train_hetero_data.metadata()
 # Define the Heterogeneous RGCN model
 class HeteroRGCN(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels):
@@ -97,7 +113,7 @@ class HeteroRGCN(torch.nn.Module):
         return x_dict
 
 hidden_channels = 64
-out_channels = hetero_data['cell'].y.max().item() + 1
+out_channels = train_hetero_data['cell'].y.max().item() + 1
 
 model = HeteroRGCN(hidden_channels, out_channels).to(device)
 
@@ -162,36 +178,19 @@ plt.title('Test Accuracy over Epochs')
 plt.legend()
 plt.show()
 
-# Final Evaluation on Test Set
-test_loader = NeighborLoader(
-    hetero_data,
-    num_neighbors={key: [-1] for key in hetero_data.edge_types},
-    batch_size=128,
-    input_nodes=('cell', hetero_data['cell'].test_mask),
-)
+# Load the model's state dictionary on CPU
+torch.save(model.state_dict(), os.path.join(MODEL_PATH, 'HAN_model_weights.pth'))
 
+
+# Evaluate the model
 model.eval()
-all_preds = []
-all_labels = []
 with torch.no_grad():
-    for batch in test_loader:
-        batch = batch.to(device)
-        out = model(batch.x_dict, batch.edge_index_dict)
-        preds = out['cell'].argmax(dim=1)
-        labels = batch['cell'].y
-        all_preds.append(preds.cpu())
-        all_labels.append(labels.cpu())
-
-y_pred = torch.cat(all_preds).numpy()
-y_true = torch.cat(all_labels).numpy()
-
-# Compute and plot the confusion matrix
-cm = confusion_matrix(y_true, y_pred)
-plt.figure(figsize=(12, 10))
-disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-disp.plot(cmap=plt.cm.Blues)
-plt.title('Confusion Matrix')
-plt.show()
-
-# Print classification report
-print(classification_report(y_true, y_pred))
+    out = model(test_hetero_data.x_dict, test_hetero_data.edge_index_dict)
+    pred = out.argmax(dim=1)
+    y_pred = pred.cpu().numpy()
+    visualize_predictions(test_X, y_pred, inverse_dict, os.path.join(IMAGE_PATH, 'UMAP_HAN_Modelpwd.png'))
+    np.save(os.path.join(RESULT_PATH, 'pred.npy'), y_pred)
+    # Save dictionary to a file
+    with open(os.path.join(IMAGE_PATH, 'inverse_dict.pkl'), 'wb') as fp:
+        pickle.dump(inverse_dict, fp)
+    print('Dictionary saved successfully to file')
