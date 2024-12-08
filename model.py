@@ -1,243 +1,236 @@
+import os
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
-
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+import torch.nn.functional as F
+import pickle
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import utils
 
-from torch_geometric.data import HeteroData
-from torch_geometric.nn.models import MetaPath2Vec
+project_dir = os.environ.get('PROJECT', os.curdir)
 
-# Custom module functions (ensure these are properly defined in your 'data_processing' module)
-from data_processing import (
-    load_csv,
-    encode_cell_types,
-    construct_similarity_adjacency,
-    construct_spatial_adjacency
-)
+ANNOTATED_DATA = os.path.join(project_dir, 'data/B004_training_dryad.csv')
+UNANNOTATED_DATA = os.path.join(project_dir, 'data/B0056_unnanotated_dryad.csv')
+MODEL_PATH = os.path.join(project_dir, 'model')
+IMAGE_PATH = os.path.join(project_dir, 'image')
+RESULT_PATH = os.path.join(project_dir, 'result')
+
+if not os.path.exists(MODEL_PATH):
+    os.mkdir(MODEL_PATH)
+if not os.path.exists(IMAGE_PATH):
+    os.mkdir(IMAGE_PATH)
+if not os.path.exists(RESULT_PATH):
+    os.mkdir(RESULT_PATH)
+
+dist_threshold = 30
+neighborhood_size_threshold = 10
+sample_rate = .01
 
 # Set device
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
+torch.cuda.empty_cache()
 
-# Load the data
-TRAINING_DATA_PATH = 'data/B004_training_dryad.csv'
-df = load_csv(TRAINING_DATA_PATH)
+# Load train and test data
+train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict = utils.load_hubmap_data(ANNOTATED_DATA, UNANNOTATED_DATA, dist_threshold, neighborhood_size_threshold, sample_rate)
 
-# List of genes
-genes = ['MUC2', 'SOX9', 'MUC1', 'CD31', 'Synapto', 'CD49f', 'CD15', 'CHGA', 'CDX2', 'ITLN1',
-         'CD4', 'CD127', 'Vimentin', 'HLADR', 'CD8', 'CD11c', 'CD44', 'CD16', 'BCL2', 'CD3',
-         'CD123', 'CD38', 'CD90', 'aSMA', 'CD21', 'NKG2D', 'CD66', 'CD57', 'CD206', 'CD68',
-         'CD34', 'aDef5', 'CD7', 'CD36', 'CD138', 'CD45RO', 'Cytokeratin', 'CK7', 'CD117',
-         'CD19', 'Podoplanin', 'CD45', 'CD56', 'CD69', 'Ki67', 'CD49a', 'CD163', 'CD161']
+num_nodes = train_X.shape[0]
+A_spatial = torch.zeros((num_nodes, num_nodes), device=device)
+A_similar = torch.zeros((num_nodes, num_nodes), device=device)
 
-df.rename(columns={'Unnamed: 0': 'cell_id'}, inplace=True)
+A_spatial[labeled_spatial_edges[0], labeled_spatial_edges[1]] = 1
+A_spatial[labeled_spatial_edges[1], labeled_spatial_edges[0]] = 1  # if undirected
 
-# Randomly select a subset of data
-# random_indices = torch.randint(low=0, high=df.shape[0], size=(10000,)).tolist()
-X = df.loc[genes].values
-y, _ = encode_cell_types(df.loc['cell_type_A'].values.flatten())
-coordinates = df.loc[['x', 'y']].values
+A_similar[labeled_similarity_edges[0], labeled_similarity_edges[1]] = 1
+A_similar[labeled_similarity_edges[1], labeled_similarity_edges[0]] = 1  # if undirected
 
-# Construct adjacency matrices
-sim_edge_index, _ = construct_similarity_adjacency(X)
-spatial_edge_index, _ = construct_spatial_adjacency(coordinates)
+# For the test set, you can also create adjacency matrices, but typically GTN training
+# is done on the full graph. Adjust as needed.
 
-# Build the heterogeneous graph
-meta_path = [('cell', 'spatially_close_to', 'cell'), ('cell', 'similar_to', 'cell')]
-edge_dict = {
-    ('cell', 'spatially_close_to', 'cell'): {'edge_index': spatial_edge_index.to(device)},
-    ('cell', 'similar_to', 'cell'): {'edge_index': sim_edge_index.to(device)}
-}
+As = [A_spatial, A_similar]  # list of adjacency matrices
+X = train_X  # Node features
+Y = train_y  # Labels
 
-hetero_data = HeteroData(edge_dict)
-hetero_data['cell'].x = torch.tensor(X, device=device, dtype=torch.float)
-hetero_data['cell'].y = torch.tensor(y, device=device, dtype=torch.long)
+# Train/val split
+num_nodes = X.shape[0]
+train_ratio = 0.8
+num_train = int(num_nodes * train_ratio)
 
-# Initialize the MetaPath2Vec model
-HIDDEN_DIM = 128
-metapath2vec_model = MetaPath2Vec(
-    edge_index_dict=hetero_data.edge_index_dict,
-    embedding_dim=HIDDEN_DIM,
-    metapath=meta_path,
-    walk_length=2,
-    context_size=2
-).to(device)
+perm = torch.randperm(num_nodes)
+train_idx = perm[:num_train]
+val_idx = perm[num_train:]
 
-loader = metapath2vec_model.loader(batch_size=128, shuffle=True, num_workers=4)
-optimizer = optim.Adam(metapath2vec_model.parameters(), lr=0.01)
+train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+train_mask[train_idx] = True
+val_mask = torch.zeros(num_nodes, dtype=torch.bool)
+val_mask[val_idx] = True
 
-def train(epoch, log_steps=100):
-    metapath2vec_model.train()
-    total_loss = 0
-    losses = []
-    for i, (pos_rw, neg_rw) in enumerate(loader):
-        optimizer.zero_grad()
-        loss = metapath2vec_model.loss(pos_rw.to(device), neg_rw.to(device))
-        loss.backward()
-        optimizer.step()
+num_classes = Y.max().item() + 1
 
-        total_loss += loss.item()
-        losses.append(loss.item())
-        if (i + 1) % log_steps == 0:
-            avg_loss = total_loss / log_steps
-            print(f'Epoch: {epoch}, Step: {i + 1}/{len(loader)}, Loss: {avg_loss:.4f}')
-            total_loss = 0
-    return losses
 
-@torch.no_grad()
-def test():
-    metapath2vec_model.eval()
-    z = metapath2vec_model('cell')
-    y = hetero_data['cell'].y
+#############################################################
+# Define the GTN layers and model
+# Code adapted from the official GTN implementation:
+# https://github.com/seongjunyun/Graph_Transformer_Network
+#############################################################
 
-    perm = torch.randperm(z.size(0))
-    train_perm = perm[:int(z.size(0) * 0.1)]
-    test_perm = perm[int(z.size(0) * 0.1):]
+class GTLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, num_A, num_channels, dropout=0.0):
+        super(GTLayer, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.num_A = num_A
+        self.num_channels = num_channels
+        self.is_train = True
+        self.weight = nn.Parameter(torch.zeros(num_channels, in_channels, out_channels))
+        self.att_weight = nn.Parameter(torch.zeros(num_channels, in_channels, num_A))
+        nn.init.xavier_uniform_(self.weight)
+        nn.init.xavier_uniform_(self.att_weight)
+        self.dropout = dropout
 
-    return metapath2vec_model.test(
-        z[train_perm], y[train_perm],
-        z[test_perm], y[test_perm],
-        max_iter=150
-    )
+    def forward(self, As, H):
+        # As: list of adjacency matrices (num_A)
+        # H: node embeddings [N, in_channels]
+        # Output: new node embeddings [N, out_channels], meta adjacency selection
+        # For simplicity, let's assume a single layer of GTN which chooses adjacency combos.
 
-# Training the MetaPath2Vec model
+        # Compute attention scores for each channel
+        # att: [num_channels, in_channels, num_A]
+        att = self.att_weight
+        # We want to select adjacency matrices from As based on att:
+        # Expand H: [N, in_channels] -> broadcasting over channels
+        # We'll first compute a linear transform: H' = H W  (for each channel)
+        # shape: H: [N, in_channels], weight: [num_channels, in_channels, out_channels]
+        # After matrix multiplication: H': [num_channels, N, out_channels]
+
+        H_prime = []
+        for c in range(self.num_channels):
+            Hc = H @ self.weight[c]  # [N, out_channels]
+            # Now combine adjacency matrices based on attention
+            # att[c] shape: [in_channels, num_A], but we need scalar weights for A selection
+            # Typically, GTN uses a softmax over As. Let's say we do:
+            # For simplicity, here we just sum over input channels dimension by average
+            # In practice, GTN attempts to learn meta-path by multiplying adjacency matrices.
+            # The original GTN code uses a different approach:
+            # It learns a selection of adjacency matrices and multiplies them to form meta-paths.
+            # Due to complexity, we show a simplified version here.
+
+            # A simplified GTN might just learn a convex combination of As:
+            # Flatten the att for channel c to get a distribution over As.
+            att_c = att[c].mean(dim=0)  # [num_A]
+            score = F.softmax(att_c, dim=0)  # distribution over As
+
+            # Combine adjacency:
+            A_combined = torch.zeros_like(As[0])
+            for i, A in enumerate(As):
+                A_combined += score[i] * A
+
+            # Now propagate Hc through A_combined
+            Hc = A_combined @ Hc
+            H_prime.append(Hc)
+
+        H_prime = torch.stack(H_prime, dim=0)  # [num_channels, N, out_channels]
+        # Mean pooling over channels
+        H_out = H_prime.mean(dim=0)  # [N, out_channels]
+
+        if self.dropout > 0:
+            H_out = F.dropout(H_out, p=self.dropout, training=self.training)
+        return H_out
+
+
+class GTN(nn.Module):
+    def __init__(self, num_edge_types, num_channels, in_features, hidden_features, out_features, num_layers=1,
+                 dropout=0.5):
+        super(GTN, self).__init__()
+        self.num_edge_types = num_edge_types
+        self.num_channels = num_channels
+        self.num_layers = num_layers
+        self.dropout = dropout
+
+        layers = []
+        in_dim = in_features
+        for l in range(num_layers):
+            out_dim = hidden_features if l < num_layers - 1 else out_features
+            layers.append(GTLayer(in_dim, out_dim, num_edge_types, num_channels, dropout=dropout))
+            in_dim = out_dim
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, As, X):
+        H = X
+        for i, layer in enumerate(self.layers):
+            H = layer(As, H)
+            if i < self.num_layers - 1:
+                H = F.relu(H)
+        return H
+
+
+#############################################################
+# Initialize and train the GTN model
+#############################################################
+
+in_channels = X.shape[1]
+model = GTN(num_edge_types=len(As),
+            num_channels=2,  # can be tuned
+            in_features=in_channels,
+            hidden_features=128,
+            out_features=num_classes,
+            num_layers=2,
+            dropout=0.5).to(device)
+
+X = X.to(device)
+Y = Y.to(device)
+for i in range(len(As)):
+    As[i] = As[i].to(device)
+
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0005)
+criterion = nn.CrossEntropyLoss()
+
+num_epochs = 200
 train_losses = []
-test_accuracies = []
+val_accuracies = []
 
-for epoch in range(1, 10):
-    epoch_losses = train(epoch)
-    train_losses.extend(epoch_losses)
-    acc = test()
-    print(f'Epoch: {epoch}, Accuracy: {acc:.4f}')
-    test_accuracies.append(acc)
+for epoch in tqdm(range(1, num_epochs + 1), desc='Epoch'):
+    model.train()
+    optimizer.zero_grad()
+    out = model(As, X)
+    loss = criterion(out[train_mask], Y[train_mask])
+    loss.backward()
+    optimizer.step()
+    train_losses.append(loss.item())
 
-# Plot the MetaPath2Vec training loss curve
+    # Validation
+    model.eval()
+    with torch.no_grad():
+        val_out = out[val_mask]
+        val_pred = val_out.argmax(dim=-1)
+        val_correct = (val_pred == Y[val_mask]).sum().item()
+        val_acc = val_correct / val_mask.sum().item()
+        val_accuracies.append(val_acc)
+
+    if epoch % 20 == 0:
+        print(f'Epoch {epoch}/{num_epochs}, Loss: {loss.item():.4f}, Val Accuracy: {val_acc:.4f}')
+
+# Plot the training loss
 plt.figure(figsize=(10, 5))
-plt.plot(train_losses)
-plt.title('MetaPath2Vec Training Loss Curve')
-plt.xlabel('Iteration')
+plt.plot(range(1, num_epochs + 1), train_losses, label='Training Loss')
+plt.xlabel('Epoch')
 plt.ylabel('Loss')
+plt.title('GTN Training Loss')
+plt.legend()
 plt.show()
 
-# Plot the test accuracy over epochs
+# Plot the validation accuracy
 plt.figure(figsize=(10, 5))
-plt.plot(range(1, 10), test_accuracies)
-plt.title('MetaPath2Vec Test Accuracy over Epochs')
+plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
+plt.title('GTN Validation Accuracy')
+plt.legend()
 plt.show()
 
-# Compute the cell embeddings
-cell_embeddings = metapath2vec_model('cell')
-labels = hetero_data['cell'].y
-
-# Convert to NumPy arrays and split
-X = cell_embeddings.cpu().detach().numpy()
-y = labels.cpu().detach().numpy()
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
-
-# Convert back to tensors
-X_train = torch.tensor(X_train, device=device, dtype=torch.float)
-X_test = torch.tensor(X_test, device=device, dtype=torch.float)
-y_train = torch.tensor(y_train, device=device, dtype=torch.long)
-y_test = torch.tensor(y_test, device=device, dtype=torch.long)
-
-# Define the MLP classifier
-class MLPClassifier(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.5):
-        super(MLPClassifier, self).__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(hidden_dim, output_dim)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.dropout(x)
-        x = self.fc2(x)
-        return x
-
-input_dim = cell_embeddings.size(1)
-hidden_dim = 64
-output_dim = labels.max().item() + 1
-
-model = MLPClassifier(input_dim, hidden_dim, output_dim).to(device)
-
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-from torch.utils.data import TensorDataset, DataLoader
-
-batch_size = 128
-
-train_dataset = TensorDataset(X_train, y_train)
-test_dataset = TensorDataset(X_test, y_test)
-
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size)
-
-def train_model(model, criterion, optimizer, train_loader, num_epochs=20):
-    model.train()
-    epoch_losses = []
-    for epoch in range(num_epochs):
-        total_loss = 0
-        for batch_x, batch_y in train_loader:
-            optimizer.zero_grad()
-            outputs = model(batch_x)
-            loss = criterion(outputs, batch_y)
-            loss.backward()
-            optimizer.step()
-
-            total_loss += loss.item() * batch_x.size(0)
-        avg_loss = total_loss / len(train_loader.dataset)
-        epoch_losses.append(avg_loss)
-        print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}')
-    return epoch_losses
-
-def evaluate_model(model, test_loader):
-    model.eval()
-    correct = 0
-    total = 0
-    all_preds = []
-    all_labels = []
-    with torch.no_grad():
-        for batch_x, batch_y in test_loader:
-            outputs = model(batch_x)
-            _, predicted = torch.max(outputs.data, 1)
-            total += batch_y.size(0)
-            correct += (predicted == batch_y).sum().item()
-            all_preds.extend(predicted.cpu().numpy())
-            all_labels.extend(batch_y.cpu().numpy())
-    accuracy = correct / total
-    print(f'Accuracy: {accuracy:.4f}')
-    return all_preds, all_labels
-
-# Train the MLP classifier
-num_epochs = 20
-mlp_train_losses = train_model(model, criterion, optimizer, train_loader, num_epochs)
-
-# Plot the MLP training loss curve
-plt.figure(figsize=(10, 5))
-plt.plot(range(1, num_epochs + 1), mlp_train_losses)
-plt.title('MLP Training Loss Curve')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.show()
-
-# Evaluate the model
-preds, labels = evaluate_model(model, test_loader)
-print(classification_report(labels, preds))
-
-# Compute and plot the confusion matrix
-cm = confusion_matrix(labels, preds)
-plt.figure(figsize=(12, 10))
-disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-disp.plot(cmap=plt.cm.Blues)
-plt.title('Confusion Matrix')
-plt.show()
+# Save model
+MODEL_PATH = './model'
+if not os.path.exists(MODEL_PATH):
+    os.mkdir(MODEL_PATH)
+torch.save(model.state_dict(), os.path.join(MODEL_PATH, 'GTN_model_weights.pth'))

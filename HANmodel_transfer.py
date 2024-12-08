@@ -3,11 +3,8 @@ import os
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
-
-from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
-
+import pickle
 from torch_geometric.data import HeteroData
 from torch_geometric.loader import HGTLoader
 from torch_geometric.nn import HANConv
@@ -15,25 +12,20 @@ from tqdm import tqdm
 import torch.nn.functional as F
 from utils import load_hubmap_data, visualize_predictions
 
-# Custom module functions (ensure these are properly defined in your 'data_processing' module)
-from data_processing import (
-    load_csv,
-    encode_cell_types,
-    construct_similarity_adjacency,
-    construct_spatial_adjacency
-)
-
 project_dir = os.environ.get('PROJECT', os.curdir)
 
 ANNOTATED_DATA = os.path.join(project_dir, 'data/B004_training_dryad.csv')
 UNANNOTATED_DATA = os.path.join(project_dir, 'data/B0056_unnanotated_dryad.csv')
 MODEL_PATH = os.path.join(project_dir, 'model')
 IMAGE_PATH = os.path.join(project_dir, 'image')
+RESULT_PATH = os.path.join(project_dir, 'result')
 
 if not os.path.exists(MODEL_PATH):
     os.mkdir(MODEL_PATH)
 if not os.path.exists(IMAGE_PATH):
     os.mkdir(IMAGE_PATH)
+if not os.path.exists(RESULT_PATH):
+    os.mkdir(RESULT_PATH)
 
 dist_threshold = 30
 neighborhood_size_threshold = 10
@@ -93,9 +85,9 @@ train_hetero_data['cell'].train_mask[train_idx] = True
 train_hetero_data['cell'].test_mask = torch.zeros(num_nodes, dtype=torch.bool)
 train_hetero_data['cell'].test_mask[val_idx] = True
 
-train_loader = HGTLoader(train_hetero_data, num_samples=[64], shuffle=True, batch_size = 128,
+train_loader = HGTLoader(train_hetero_data, num_samples=[512]*4, shuffle=True, batch_size = 128,
                              input_nodes=('cell', train_hetero_data['cell'].train_mask))
-val_loader = HGTLoader(train_hetero_data, num_samples=[64], batch_size = 128,
+val_loader = HGTLoader(train_hetero_data, num_samples=[512]*4, batch_size = 128,
                            input_nodes=('cell', train_hetero_data['cell'].test_mask))
 
 # Get metadata
@@ -105,8 +97,8 @@ metadata = train_hetero_data.metadata()
 class HAN(torch.nn.Module):
     def __init__(self, metadata, in_channels, out_channels, hidden_channels=128, heads=2):
         super().__init__()
-        self.conv1 = HANConv(in_channels, hidden_channels, heads=heads, dropout=0.6, metadata=metadata)
-        self.conv2 = HANConv(hidden_channels, hidden_channels, heads=heads, dropout=0.6, metadata=metadata)
+        self.conv1 = HANConv(in_channels, hidden_channels, heads=heads, dropout=0.1, metadata=metadata)
+        self.conv2 = HANConv(hidden_channels, hidden_channels, heads=heads, dropout=0.1, metadata=metadata)
         self.lin = nn.Linear(hidden_channels, out_channels)
 
     def forward(self, x_dict, edge_index_dict):
@@ -120,7 +112,7 @@ class HAN(torch.nn.Module):
 in_channels = train_hetero_data['cell'].x.size(1)
 num_classes = train_hetero_data['cell'].y.max().item() + 1
 
-model = HAN(metadata, in_channels, num_classes, hidden_channels=128, heads=2).to(device)
+model = HAN(metadata, in_channels, num_classes, hidden_channels=128, heads=4).to(device)
 
 
 # Define optimizer and loss function
@@ -198,8 +190,13 @@ with torch.no_grad():
     out = model(test_hetero_data.x_dict, test_hetero_data.edge_index_dict)
     pred = out.argmax(dim=1)
     y_pred = pred.cpu().numpy()
-    visualize_predictions(test_X, y_pred, inverse_dict, os.path.join(IMAGE_PATH, 'UMAP_HAN_Modelpwd'
-                                                                                 '.png'))
+    visualize_predictions(test_X, y_pred, inverse_dict, os.path.join(IMAGE_PATH, 'UMAP_HAN_Modelpwd.png'))
+    np.save(os.path.join(RESULT_PATH, 'pred.npy'), y_pred)
+    # Save dictionary to a file
+    with open(os.path.join(IMAGE_PATH, 'inverse_dict.pkl'), 'wb') as fp:
+        pickle.dump(inverse_dict, fp)
+    print('Dictionary saved successfully to file')
+
     # y_true = test_hetero_data['cell'].y[test_hetero_data['cell'].test_mask].cpu().numpy()
 
 # Compute and plot the confusion matrix
