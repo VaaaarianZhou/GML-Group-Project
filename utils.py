@@ -34,6 +34,7 @@ def get_hubmap_edge_index(X, pos, regions, distance_thres, neighborhood_size_thr
     src = []
     dst = []
     regions_unique = np.unique(regions)
+    current_length = 0
     for reg in regions_unique:
         # Build spatial edges
         locs = np.where(regions == reg)[0]
@@ -51,11 +52,11 @@ def get_hubmap_edge_index(X, pos, regions, distance_thres, neighborhood_size_thr
             scores = row @ X_region.T
             neighbors = scores.argsort()[-neighborhood_size_thres:]
             # src.append(np.full((neighborhood_size_thres,), idx))
-            src.extend([locs[idx]]*neighborhood_size_thres)
-            dst.extend([locs[n] for n in neighbors])
+            src.extend([current_length + idx]*neighborhood_size_thres)
+            dst.extend(current_length + neighbors)
+        current_length += X_region.shape[0]
         # similarity_edge_index = np.stack([np.concatenate(src), np.concatenate(dst)])
         # edge_weights = torch.concat(edge_weights)
-
     similarity_edge_list = [[u,v] for (u,v) in zip(src, dst)]
     return spatial_edge_list, similarity_edge_list
 
@@ -95,38 +96,6 @@ def load_hubmap_data(labeled_file, unlabeled_file, distance_thres, neighborhood_
     labeled_spatial_edges, labeled_similarity_edges = get_hubmap_edge_index(train_X, labeled_pos, labeled_regions, distance_thres, neighborhood_size_thres)
     unlabeled_spatial_edges, unlabeled_similarity_edges = get_hubmap_edge_index(test_X, unlabeled_pos, unlabeled_regions, distance_thres, neighborhood_size_thres)
     return train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
-
-def load_hubmap_data_CL_SB(df, distance_thres, neighborhood_size_thres, sample_rate):
-    train_df = pd.read_csv(df)
-    test_df = pd.read_csv(df)
-    train_df = train_df.sample(n=round(sample_rate*len(train_df)), random_state=1)
-    test_df = test_df.sample(n=round(sample_rate*len(test_df)), random_state=1)
-    train_df = train_df[(train_df['tissue'] == 'CL')]
-    test_df = test_df[(test_df['tissue'] == 'SB')]
-    train_X = train_df.iloc[:, 1:49].to_numpy() # node features, indexes depend on specific datasets
-    train_X = normalize(train_X)
-    test_X = test_df.iloc[:, 1:49].to_numpy()
-    test_X = normalize(test_X)
-    labeled_pos = train_df.iloc[:, -6:-4].values # x,y coordinates, indexes depend on specific datasets
-    unlabeled_pos = test_df.iloc[:, -6:-4].values
-    labeled_regions = train_df['unique_region']
-    unlabeled_regions = test_df['unique_region']
-    train_y = train_df['cell_type_A'] # class information
-     # Combine cell types from both datasets
-    cell_types_CL = set(train_df['cell_type_A'].values)
-    cell_types_SB = set(test_df['cell_type_A'].values)
-    cell_types = np.sort(list(cell_types_CL.union(cell_types_SB))).tolist()
-    # we here map class in texts to categorical numbers and also save an inverse_dict to map the numbers back to texts
-    cell_type_dict = {}
-    inverse_dict = {}
-    for i, cell_type in enumerate(cell_types):
-        cell_type_dict[cell_type] = i
-        inverse_dict[i] = cell_type
-    train_y = np.array([cell_type_dict[x] for x in train_y])
-    labeled_spatial_edges, labeled_similarity_edges = get_hubmap_edge_index(train_X, labeled_pos, labeled_regions, distance_thres, neighborhood_size_thres)
-    unlabeled_spatial_edges, unlabeled_similarity_edges = get_hubmap_edge_index(test_X, unlabeled_pos, unlabeled_regions, distance_thres, neighborhood_size_thres)
-    return train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
-
 def load_tonsilbe_data(filename, distance_thres, sample_rate):
     df = pd.read_csv(filename)
     train_df = df.loc[df['sample_name'] == 'tonsil']
