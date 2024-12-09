@@ -34,7 +34,7 @@ def get_hubmap_edge_index(X, pos, regions, distance_thres, neighborhood_size_thr
     src = []
     dst = []
     regions_unique = np.unique(regions)
-    current_length = 0
+    index = np.arange(len(X.shape[0]))
     for reg in regions_unique:
         # Build spatial edges
         locs = np.where(regions == reg)[0]
@@ -48,13 +48,13 @@ def get_hubmap_edge_index(X, pos, regions, distance_thres, neighborhood_size_thr
         # Build molecular similarity edges
 
         X_region = X[locs, :]
+        indices = index[locs]
         for idx, row in enumerate(X_region):
             scores = row @ X_region.T
             neighbors = scores.argsort()[-neighborhood_size_thres:]
             # src.append(np.full((neighborhood_size_thres,), idx))
-            src.extend([current_length + idx]*neighborhood_size_thres)
-            dst.extend(current_length + neighbors)
-        current_length += X_region.shape[0]
+            src.extend([indices[idx]]*neighborhood_size_thres)
+            dst.extend(indices[neighbors])
         # similarity_edge_index = np.stack([np.concatenate(src), np.concatenate(dst)])
         # edge_weights = torch.concat(edge_weights)
     similarity_edge_list = [[u,v] for (u,v) in zip(src, dst)]
