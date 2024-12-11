@@ -4,7 +4,13 @@
    conda env create -f environment.yml
    conda activate pyg_env
    ```
-2. Please navigate to the working directory and run scripts GTNmodel.py, HANmodel.py, and RGCNmodel.py models to replicate the experimental results. These scripts will run a experiment with $threshold_distance =$ {10,20,30,40,50}, and $topk$ = 10 by default. 
+2. Now, if you are running in a slurm based computing cluster, then please run the sbatch job script. Adjust the job description according to your resources, then you may skip to step 4; otherwise, if you are running on a computer, please go to step 3.
+```
+   sbatch HANmodel_training.job
+   sbatch RGCNmodel_training.job
+   sbatch GTNmodel_training.job
+```
+3. Please navigate to the working directory and run scripts GTNmodel.py, HANmodel.py, and RGCNmodel.py models to replicate the experimental results. These scripts will run a experiment with $threshold_distance =$ {10,20,30,40,50}, and $topk$ = 10 by default. 
 ```
    python GTNmodel.py
    python HANmodel.py
