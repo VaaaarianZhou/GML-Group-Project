@@ -1,4 +1,4 @@
-name: pyg_env_2
+name: pyg_env
 channels:
   - pyg
   - pytorch
