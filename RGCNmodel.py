@@ -15,7 +15,7 @@ from utils import load_hubmap_data, visualize_predictions, write_result_to_csv, 
 project_dir = os.environ.get('PROJECT', os.curdir)
 project_dir += '/GML-Group-Project'
 local_dir = os.environ.get('LOCAL', os.curdir)
-task_id = os.environ.get("SLURM_ARRAY_TASK_ID", 0)
+task_id = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))
 
 MODEL_NAME = 'RGCN'
 ANNOTATED_DATA = os.path.join(project_dir, 'data/B004_training_dryad.csv')
