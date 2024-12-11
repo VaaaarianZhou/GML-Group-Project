@@ -12,7 +12,7 @@
    sbatch RGCNmodel_training.job
    sbatch GTNmodel_training.job
    ```
-3. Please navigate to the working directory and run scripts GTNmodel.py, HANmodel.py, and RGCNmodel.py models to replicate the experimental results. These scripts will run a experiment with $threshold_distance =$ {10,20,30,40,50}, and $topk$ = 10 by default. 
+3. Please navigate to the working directory and run scripts GTNmodel.py, HANmodel.py, and RGCNmodel.py models to replicate the experimental results. These scripts will run a experiment with $threshold distance =$ {10,20,30,40,50}, and $topk$ = 10 by default. 
    ```
    python GTNmodel.py
    python HANmodel.py
