@@ -16,7 +16,7 @@
    python HANmodel.py
    python RGCNmodel.py
    ```
-   Please be reminded that the script was designed to run in a computing cluster, and the $topk$ value is bound to the environmental variable **SLURM_ARRAY_TASK_ID**, which is default to 0 if not found. If you want to change the $topk$ value, you can ignore the **SLURM_ARRAY_TASK_ID** and set the first value manually.
+   Please be reminded that the script was designed to run in a computing cluster, and the $topk$ value (default = 10) is bound to the environmental variable **SLURM_ARRAY_TASK_ID**, which is default to 0 if not found. If you want to change the $topk$ value, you can ignore the **SLURM_ARRAY_TASK_ID** and set the first value manually.
 
 4. Please check /result/result.csv for the experimental result in csv format.
 
