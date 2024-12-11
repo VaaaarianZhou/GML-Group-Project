@@ -9,15 +9,6 @@ import umap
 import matplotlib.pyplot as plt
 import csv
 import os
-
-genes = ['MUC2', 'SOX9', 'MUC1', 'CD31', 'Synapto', 'CD49f',
-       'CD15', 'CHGA', 'CDX2', 'ITLN1', 'CD4', 'CD127', 'Vimentin', 'HLADR',
-       'CD8', 'CD11c', 'CD44', 'CD16', 'BCL2', 'CD3', 'CD123', 'CD38', 'CD90',
-       'aSMA', 'CD21', 'NKG2D', 'CD66', 'CD57', 'CD206', 'CD68', 'CD34',
-       'aDef5', 'CD7', 'CD36', 'CD138', 'CD45RO', 'Cytokeratin', 'CK7',
-       'CD117', 'CD19', 'Podoplanin', 'CD45', 'CD56', 'CD69', 'Ki67', 'CD49a',
-       'CD163', 'CD161']
-
 def get_hubmap_edge_index(X, pos, regions, distance_thres, neighborhood_size_thres):
     # construct edge indexes when there is region information
     spatial_edge_list = []
