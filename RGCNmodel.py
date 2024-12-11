@@ -190,5 +190,4 @@ for dist_threshold in dist_thresholds:
     write_result_to_csv(RESULT_PATH, MODEL_NAME, dist_threshold, neighborhood_size_threshold, test_loss, test_acc)
     
     # Load the model's state dictionary on CPU
-    torch.save(model.state_dict(),
-               os.path.join(MODEL_PATH, f'HAN_model_{dist_threshold}_{neighborhood_size_threshold}_weights.pth'))
+    torch.save(model.state_dict(), os.path.join(MODEL_PATH, f'{MODEL_NAME}_model_{dist_threshold}_{neighborhood_size_threshold}_weights.pth'))
