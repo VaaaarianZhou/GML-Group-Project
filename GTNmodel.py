@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,14 +8,21 @@ import pickle
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import utils
+from utils import EarlyStopping, write_result_to_csv
+from torch_geometric.utils import to_dense_adj
 
 project_dir = os.environ.get('PROJECT', os.curdir)
+project_dir += '/GML-Group-Project'
+local_dir = os.environ.get('LOCAL', os.curdir)
+task_id = os.environ.get("SLURM_ARRAY_TASK_ID", 0)
 
+MODEL_NAME = 'GTN'
 ANNOTATED_DATA = os.path.join(project_dir, 'data/B004_training_dryad.csv')
 UNANNOTATED_DATA = os.path.join(project_dir, 'data/B0056_unnanotated_dryad.csv')
 MODEL_PATH = os.path.join(project_dir, 'model')
 IMAGE_PATH = os.path.join(project_dir, 'image')
 RESULT_PATH = os.path.join(project_dir, 'result')
+CHECK_POINT_PATH = os.path.join(local_dir, 'checkpoints')
 
 if not os.path.exists(MODEL_PATH):
     os.mkdir(MODEL_PATH)
@@ -22,51 +30,17 @@ if not os.path.exists(IMAGE_PATH):
     os.mkdir(IMAGE_PATH)
 if not os.path.exists(RESULT_PATH):
     os.mkdir(RESULT_PATH)
+if not os.path.exists(CHECK_POINT_PATH):
+    os.mkdir(CHECK_POINT_PATH)
 
-dist_threshold = 30
-neighborhood_size_threshold = 10
-sample_rate = .01
+dist_thresholds = {10, 20, 30, 40, 50}
+neighborhood_size_threshold = 10 * (task_id + 1)
+sample_rate = 1
 
-# Set device
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-device = torch.device('cpu')
-torch.cuda.empty_cache()
+#Read training data
+train_df = pd.read_csv(ANNOTATED_DATA, low_memory=False)
 
-# Load train and test data
-train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict = utils.load_hubmap_data(ANNOTATED_DATA, UNANNOTATED_DATA, dist_threshold, neighborhood_size_threshold, sample_rate)
-
-num_nodes = train_X.shape[0]
-A_spatial = torch.zeros((num_nodes, num_nodes), device=device)
-A_similar = torch.zeros((num_nodes, num_nodes), device=device)
-
-A_spatial[labeled_spatial_edges[0], labeled_spatial_edges[1]] = 1
-A_spatial[labeled_spatial_edges[1], labeled_spatial_edges[0]] = 1  # if undirected
-
-A_similar[labeled_similarity_edges[0], labeled_similarity_edges[1]] = 1
-A_similar[labeled_similarity_edges[1], labeled_similarity_edges[0]] = 1  # if undirected
-
-# For the test set, you can also create adjacency matrices, but typically GTN training
-# is done on the full graph. Adjust as needed.
-
-As = [A_spatial, A_similar]  # list of adjacency matrices
-X = train_X  # Node features
-Y = train_y  # Labels
-
-# Train/val split
-num_nodes = X.shape[0]
-train_ratio = 0.8
-num_train = int(num_nodes * train_ratio)
-
-perm = torch.randperm(num_nodes)
-train_idx = perm[:num_train]
-val_idx = perm[num_train:]
-
-train_mask = torch.zeros(num_nodes, dtype=torch.bool)
-train_mask[train_idx] = True
-val_mask = torch.zeros(num_nodes, dtype=torch.bool)
-val_mask[val_idx] = True
-
-num_classes = Y.max().item() + 1
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 #############################################################
@@ -162,75 +136,96 @@ class GTN(nn.Module):
             H = layer(As, H)
             if i < self.num_layers - 1:
                 H = F.relu(H)
-        return H
+        return torch.squeeze(H)
 
+for dist_threshold in dist_thresholds:
+    # Load train and test data
+    X, Y, spatial_edges, similarity_edges, inverse_dict = utils.load_hubmap_data(train_df, dist_threshold, neighborhood_size_threshold, sample_rate)
 
-#############################################################
-# Initialize and train the GTN model
-#############################################################
+    num_nodes = X.shape[0]
+    X = torch.tensor(X, device=device, dtype = torch.float)
+    Y = torch.tensor(Y, device=device, dtype = torch.long)
+    spatial_edges = torch.tensor(spatial_edges, device=device, dtype=torch.long).T
+    similarity_edges = torch.tensor(similarity_edges, device=device, dtype=torch.long).T
 
-in_channels = X.shape[1]
-model = GTN(num_edge_types=len(As),
-            num_channels=2,  # can be tuned
-            in_features=in_channels,
-            hidden_features=128,
-            out_features=num_classes,
-            num_layers=2,
-            dropout=0.5).to(device)
+    A_spatial = to_dense_adj(spatial_edges, max_num_nodes=num_nodes)
+    A_similar = to_dense_adj(similarity_edges, max_num_nodes=num_nodes)
+    As = [A_spatial, A_similar]  # list of adjacency matrices
 
-X = X.to(device)
-Y = Y.to(device)
-for i in range(len(As)):
-    As[i] = As[i].to(device)
+    # Assign train and validation masks
+    train_ratio = 0.7
+    val_ratio = 0.1
+    num_train = int(num_nodes * train_ratio)
+    num_val = int(num_nodes * val_ratio)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0005)
-criterion = nn.CrossEntropyLoss()
+    perm = torch.randperm(num_nodes)
+    train_idx = perm[:num_train]
+    val_idx = perm[num_train:num_train + num_val]
+    test_idx = perm[num_train + num_val:]
 
-num_epochs = 200
-train_losses = []
-val_accuracies = []
+    train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    train_mask[train_idx] = True
+    val_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    val_mask[val_idx] = True
+    test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    test_mask[test_idx] = True
 
-for epoch in tqdm(range(1, num_epochs + 1), desc='Epoch'):
-    model.train()
-    optimizer.zero_grad()
-    out = model(As, X)
-    loss = criterion(out[train_mask], Y[train_mask])
-    loss.backward()
-    optimizer.step()
-    train_losses.append(loss.item())
+    num_classes = Y.max().item() + 1
+    #############################################################
+    # Initialize and train the GTN model
+    #############################################################
 
-    # Validation
+    in_channels = X.shape[1]
+    model = GTN(num_edge_types=len(As),
+                num_channels=2,  # can be tuned
+                in_features=in_channels,
+                hidden_features=128,
+                out_features=num_classes,
+                num_layers=2,
+                dropout=0.5).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=0.0005)
+    criterion = nn.CrossEntropyLoss()
+
+    num_epochs = 200
+    early_stopping = EarlyStopping(patience=10, path=os.path.join(CHECK_POINT_PATH, f'{MODEL_NAME}_best_model.pt'))
+
+    for epoch in tqdm(range(1, num_epochs + 1), desc='Epoch'):
+        model.train()
+        optimizer.zero_grad()
+        out = model(As, X)
+        loss = criterion(out[train_mask], Y[train_mask])
+        loss.backward()
+        optimizer.step()
+
+        # Validation
+        model.eval()
+        with torch.no_grad():
+            val_out = out[val_mask]
+            val_pred = val_out.argmax(dim=-1)
+            val_correct = (val_pred == Y[val_mask]).sum().item()
+            val_loss = criterion(out[val_mask], Y[val_mask]).item()
+            val_acc = val_correct / val_mask.sum().item()
+            early_stopping(val_loss, model)
+            if early_stopping.early_stop:
+                print("Early stopping triggered!")
+                break
+
+        if epoch % 20 == 0:
+            print(f'Epoch {epoch}/{num_epochs}, Loss: {val_loss:.4f}, Val Accuracy: {val_acc:.4f}')
     model.eval()
     with torch.no_grad():
-        val_out = out[val_mask]
-        val_pred = val_out.argmax(dim=-1)
-        val_correct = (val_pred == Y[val_mask]).sum().item()
-        val_acc = val_correct / val_mask.sum().item()
-        val_accuracies.append(val_acc)
+        test_out = out[test_mask]
+        test_pred = test_out.argmax(dim=-1)
+        test_correct = (test_pred == Y[test_mask]).sum().item()
+        test_acc = test_correct / test_mask.sum().item()
+        test_loss = criterion(out[test_mask], Y[test_mask]).item()
 
-    if epoch % 20 == 0:
-        print(f'Epoch {epoch}/{num_epochs}, Loss: {loss.item():.4f}, Val Accuracy: {val_acc:.4f}')
 
-# Plot the training loss
-plt.figure(figsize=(10, 5))
-plt.plot(range(1, num_epochs + 1), train_losses, label='Training Loss')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('GTN Training Loss')
-plt.legend()
-plt.show()
+    print(f'Model: {MODEL_NAME}, Threshold Distance: {dist_threshold}, TopK: {neighborhood_size_threshold}, Epoch: {epoch}, Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}')
+    write_result_to_csv(RESULT_PATH, MODEL_NAME, dist_threshold, neighborhood_size_threshold, test_loss, test_acc)
 
-# Plot the validation accuracy
-plt.figure(figsize=(10, 5))
-plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
-plt.xlabel('Epoch')
-plt.ylabel('Accuracy')
-plt.title('GTN Validation Accuracy')
-plt.legend()
-plt.show()
-
-# Save model
-MODEL_PATH = './model'
-if not os.path.exists(MODEL_PATH):
-    os.mkdir(MODEL_PATH)
-torch.save(model.state_dict(), os.path.join(MODEL_PATH, 'GTN_model_weights.pth'))
+    # Save model
+    if not os.path.exists(MODEL_PATH):
+        os.mkdir(MODEL_PATH)
+    torch.save(model.state_dict(), os.path.join(MODEL_PATH, f'{MODEL_NAME}_model_{dist_threshold}_{neighborhood_size_threshold}_weights.pth'))
