@@ -1,9 +1,11 @@
 # GML-Group-Project
+## Environment Setup
 1. Please install and activate the environment as specified in _environment.yml_ as follows.
    ```
    conda env create -f environment.yml
    conda activate pyg_env
    ```
+## Run Experiments
 2. Now, if you are running in a _slurm_ based computing cluster, then please run the sbatch job script. Adjust the job description according to your resources, then you may skip to step 4; otherwise, if you are running on a computer, please go to step 3.
    ```
    sbatch HANmodel_training.job
