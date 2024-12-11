@@ -1,12 +1,3 @@
-import pip
-def install_if_not_exist(package):
-    try:
-        __import__(package)
-    except ImportError:
-        pip.main(['install', package])
-
-
-install_if_not_exist('umap')
 import torch
 import numpy as np
 from builtins import range
@@ -18,10 +9,6 @@ import umap
 import matplotlib.pyplot as plt
 import csv
 import os
-import torch
-import numpy as np
-
-
 
 genes = ['MUC2', 'SOX9', 'MUC1', 'CD31', 'Synapto', 'CD49f',
        'CD15', 'CHGA', 'CDX2', 'ITLN1', 'CD4', 'CD127', 'Vimentin', 'HLADR',
@@ -74,8 +61,6 @@ def get_tonsilbe_edge_index(pos, distance_thres):
     edge_list = np.transpose(np.nonzero(dists_mask)).tolist()
     return edge_list
 
-# def load_hubmap_data(labeled_file, unlabeled_file, distance_thres, neighborhood_size_thres, sample_rate):
-
 def load_hubmap_data(train_df, distance_thres, neighborhood_size_thres, sample_rate):
     # test_df = pd.read_csv(unlabeled_file)
     train_df = train_df.sample(n=round(sample_rate*len(train_df)), random_state=1)
@@ -103,8 +88,7 @@ def load_hubmap_data(train_df, distance_thres, neighborhood_size_thres, sample_r
     # unlabeled_spatial_edges, unlabeled_similarity_edges = get_hubmap_edge_index(test_X, unlabeled_pos, unlabeled_regions, distance_thres, neighborhood_size_thres)
     # return train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
     return train_X, train_y, labeled_spatial_edges, labeled_similarity_edges, inverse_dict
-
-
+    
 def load_tonsilbe_data(filename, distance_thres, sample_rate):
     df = pd.read_csv(filename)
     train_df = df.loc[df['sample_name'] == 'tonsil']
@@ -123,7 +107,7 @@ def load_tonsilbe_data(filename, distance_thres, sample_rate):
         inverse_dict[i] = cell_type
     train_y = np.array([cell_type_dict[x] for x in train_y])
     labeled_spatial_edges, labeled_similarity_edges = get_tonsilbe_edge_index(labeled_pos, distance_thres)
-    unlabeled_spatial_edges, unlabeled_similarity_edges = get_tonsilbe_edge_index(unlabeled_pos, distance_thres)
+    unlabeled_spatial_edges, unlabeled_similarity_edges = get_tonsilbe_edge_index(unlabeled_pos, distance_thres) 
     return train_X, train_y, test_X, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
 
 
@@ -155,7 +139,6 @@ def visualize_predictions(X, predicted_labels, inverse_dict, save_location):
     plt.tight_layout()
     plt.savefig(save_location)
     # plt.show()
-
 def write_result_to_csv(result_path, model_name, threshold_distance, topk, val_loss, validation_acc):
     with open(os.path.join(result_path, 'result.csv'), 'a', newline='') as csvfile:
         fieldnames = ['Model', 'Threshold_Distance', 'TopK', 'Validation_Loss', 'Validation_Accuracy']
@@ -211,18 +194,3 @@ class EarlyStopping:
             print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
         torch.save(model.state_dict(), self.path)
         self.val_loss_min = val_loss
-
-
-class GraphDataset(InMemoryDataset):
-
-    def __init__(self, labeled_X, labeled_y, unlabeled_X, labeled_edges, unlabeled_edges, transform=None,):
-        self.root = '.'
-        super(GraphDataset, self).__init__(self.root, transform)
-        self.labeled_data = Data(x=torch.FloatTensor(labeled_X), edge_index=torch.LongTensor(labeled_edges).T, y=torch.LongTensor(labeled_y))
-        self.unlabeled_data = Data(x=torch.FloatTensor(unlabeled_X), edge_index=torch.LongTensor(unlabeled_edges).T)
-
-    def __len__(self):
-        return 2
-
-    def __getitem__(self, idx):
-        return self.labeled_data, self.unlabeled_data
