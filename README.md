@@ -20,5 +20,6 @@
    ```
    Please be reminded that the script was designed to run in a computing cluster, and the $topk$ value (default = 10) is bound to the environmental variable **SLURM_ARRAY_TASK_ID**, which is default to 0 if not found. If you want to change the $topk$ value, you can ignore the **SLURM_ARRAY_TASK_ID** and set it manually.
 
-4. Please check /result/result.csv for the experimental result in csv format.
+## View Results
+4. Please check /result/result.csv for the experimental result in csv format. The scripts will also store the models in a directory named **model** under the working directory.
 
