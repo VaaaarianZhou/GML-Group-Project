@@ -96,12 +96,12 @@ class GTLayer(nn.Module):
             score = F.softmax(att_c, dim=0)  # distribution over As
 
             # Combine adjacency:
-            A_combined = torch.zeros_like(As[0])
+            A_combined = torch.sparse_coo_tensor([[],[]], [], size = As[0].shape, device=device, dtype=torch.float)
             for i, A in enumerate(As):
                 A_combined += score[i] * A
 
             # Now propagate Hc through A_combined
-            Hc = A_combined @ Hc
+            Hc = torch.sparse.mm(A_combined, Hc)
             H_prime.append(Hc)
 
         H_prime = torch.stack(H_prime, dim=0)  # [num_channels, N, out_channels]
@@ -148,9 +148,9 @@ for dist_threshold in dist_thresholds:
     spatial_edges = torch.tensor(spatial_edges, device=device, dtype=torch.long).T
     similarity_edges = torch.tensor(similarity_edges, device=device, dtype=torch.long).T
 
-    A_spatial = to_dense_adj(spatial_edges, max_num_nodes=num_nodes)
-    A_similar = to_dense_adj(similarity_edges, max_num_nodes=num_nodes)
-    As = [A_spatial, A_similar]  # list of adjacency matrices
+    A_spatial_coo = torch.sparse_coo_tensor(spatial_edges, values=torch.ones(spatial_edges.shape[1]) ,size=(num_nodes, num_nodes), device=device, dtype=torch.float)
+    A_similar_coo = torch.sparse_coo_tensor(similarity_edges, values=torch.ones(similarity_edges.shape[1]), size=(num_nodes, num_nodes), device=device, dtype=torch.float)
+    As = [A_spatial_coo, A_similar_coo]  # list of adjacency matrices
 
     # Assign train and validation masks
     train_ratio = 0.7
