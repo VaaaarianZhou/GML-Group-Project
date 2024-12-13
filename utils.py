@@ -42,7 +42,24 @@ def get_hubmap_edge_index(X, pos, regions, distance_thres, neighborhood_size_thr
         # edge_weights = torch.concat(edge_weights)
     similarity_edge_list = [[u,v] for (u,v) in zip(src, dst)]
     return spatial_edge_list, similarity_edge_list
-
+    
+def get_tonsilbe_edge_index(X, pos, distance_thres, neighborhood_size_thres):
+    # construct spatial edge indexes in one region
+    dists = pairwise_distances(pos)
+    dists_mask = dists < distance_thres
+    np.fill_diagonal(dists_mask, 0)
+    spatial_edge_list = np.transpose(np.nonzero(dists_mask)).tolist()
+    src = []
+    dst = []
+    for idx, row in enumerate(X):
+        scores = row @ X.T
+        neighbors = scores.argsort()[-neighborhood_size_thres:]
+        # src.append(np.full((neighborhood_size_thres,), idx))
+        src.extend([idx] * neighborhood_size_thres)
+        dst.extend(neighbors)
+    similarity_edge_list = [[u, v] for (u, v) in zip(src, dst)]
+    return spatial_edge_list, similarity_edge_list
+    
 def load_hubmap_data(train_df, distance_thres, neighborhood_size_thres, sample_rate):
     # test_df = pd.read_csv(unlabeled_file)
     train_df = train_df.sample(n=round(sample_rate*len(train_df)), random_state=1)
@@ -141,7 +158,29 @@ def load_hubmap_data_CL_SB_batch_corrected(df, batch_corrected, distance_thres, 
     labeled_spatial_edges, labeled_similarity_edges = get_hubmap_edge_index(train_X, labeled_pos, labeled_regions, distance_thres, neighborhood_size_thres)
     unlabeled_spatial_edges, unlabeled_similarity_edges = get_hubmap_edge_index(test_X, unlabeled_pos, unlabeled_regions, distance_thres, neighborhood_size_thres)
     return train_X, train_y, test_X, test_y, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
-
+def load_tonsilbe_data(df, distance_thres, neighborhood_size_thres, sample_rate):
+    train_df = df.loc[df['sample_name'] == 'tonsil']
+    train_df = train_df.sample(n=round(sample_rate*len(train_df)), random_state=1)
+    test_df = df.loc[df['sample_name'] == 'Barretts Esophagus']
+    train_df = train_df.loc[train_df['cell_type'].isin(test_df['cell_type'])]
+    test_df = test_df.loc[test_df['cell_type'].isin(train_df['cell_type'])]
+    train_X = train_df.iloc[:, 1:-4].values
+    test_X = test_df.iloc[:, 1:-4].values
+    train_y = train_df['cell_type'].str.lower()
+    test_y = test_df['cell_type'].str.lower()
+    labeled_pos = train_df.iloc[:, -4:-2].values
+    unlabeled_pos = test_df.iloc[:, -4:-2].values
+    cell_types = np.sort(list(set(train_y))).tolist()
+    cell_type_dict = {}
+    inverse_dict = {}
+    for i, cell_type in enumerate(cell_types):
+        cell_type_dict[cell_type] = i
+        inverse_dict[i] = cell_type
+    train_y = np.array([cell_type_dict[x] for x in train_y])
+    test_y = np.array([cell_type_dict[x] for x in test_y])
+    labeled_spatial_edges, labeled_similarity_edges = get_tonsilbe_edge_index(train_X, labeled_pos, distance_thres, neighborhood_size_thres)
+    unlabeled_spatial_edges, unlabeled_similarity_edges = get_tonsilbe_edge_index(test_X, unlabeled_pos, distance_thres, neighborhood_size_thres)
+    return train_X, train_y, test_X, test_y, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
 def visualize_predictions(X, predicted_labels, inverse_dict, save_location):
     # Map numerical labels to their string annotations
     predicted_annotations = [inverse_dict[label] for label in predicted_labels]
