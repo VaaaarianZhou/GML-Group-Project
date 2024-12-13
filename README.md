@@ -1,4 +1,9 @@
 # GML-Group-Project
+
+## Datasets
+
+The dataset we utilized is from [this website](https://datadryad.org/stash/landing/show?id=doi%3A10.5061%2Fdryad.g4f4qrfrc).
+
 ## Environment Setup
 1. Please install and activate the environment as specified in _environment.yml_ as follows.
    ```
@@ -11,6 +16,10 @@
    sbatch HANmodel_training.job
    sbatch RGCNmodel_training.job
    sbatch GTNmodel_training.job
+   ```
+(optional) We utilized scanorama method for batch correction between different tissue regions. To obtain corrected expression matrix for training and evaluation, please run  
+   ```
+   python batch_correction.py B004_training_dryad.csv
    ```
 3. Please navigate to the working directory and run scripts GTNmodel.py, HANmodel.py, and RGCNmodel.py models to replicate the experimental results. These scripts will run a experiment with $threshold distance =$ {10,20,30,40,50}, and $topk$ = 10 by default. 
    ```
