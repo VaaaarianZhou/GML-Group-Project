@@ -11,15 +11,15 @@ from torch_geometric.loader import HGTLoader
 from torch_geometric.nn import GCNConv, HeteroConv
 from tqdm import tqdm
 import torch.nn.functional as F
-from utils import load_hubmap_data, visualize_predictions, write_result_to_csv, EarlyStopping, load_tonsilbe_data
+from utils import load_hubmap_data, visualize_predictions, write_result_to_csv, EarlyStopping, load_tonsilbe_data, load_hubmap_data_CL_SB
 
 project_dir = os.environ.get('PROJECT', os.curdir)
 project_dir += '/GML-Group-Project'
 local_dir = os.environ.get('LOCAL', os.curdir)
 task_id = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))
 
-MODEL_NAME = 'HAN'
-ANNOTATED_DATA = os.path.join(project_dir, 'data/BE_Tonsil_l3_dryad.csv')
+MODEL_NAME = 'RGCN'
+ANNOTATED_DATA = os.path.join(project_dir, 'data/B004_training_dryad.csv')
 MODEL_PATH = os.path.join(project_dir, 'model')
 IMAGE_PATH = os.path.join(project_dir, 'image')
 RESULT_PATH = os.path.join(project_dir, 'result')
@@ -34,9 +34,9 @@ if not os.path.exists(RESULT_PATH):
 if not os.path.exists(CHECK_POINT_PATH):
     os.mkdir(CHECK_POINT_PATH)
 
-dist_thresholds = {30, 40, 50}
-neighborhood_size_threshold = 10 * (task_id + 1)
-sample_rate = .2
+dist_thresholds = {30}
+neighborhood_size_threshold = 5
+sample_rate = .5
 
 # Read training data
 df = pd.read_csv(ANNOTATED_DATA, low_memory=False)
@@ -48,11 +48,10 @@ for dist_threshold in dist_thresholds:
     torch.cuda.empty_cache()
 
     # Load train and test data
-    train_X, train_y, test_X, test_y, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict = load_tonsilbe_data(df,
+    train_X, train_y, test_X, test_y, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict = load_hubmap_data_CL_SB(df,
                                                                                                        dist_threshold,
                                                                                                        neighborhood_size_threshold,
                                                                                                        sample_rate)
-    
         # Convert them into torch.tensor
     train_X = torch.tensor(train_X, device=device, dtype=torch.float)
     train_y = torch.tensor(train_y, device=device, dtype=torch.long)
