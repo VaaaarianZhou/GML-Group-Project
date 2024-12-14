@@ -9,6 +9,7 @@ import umap
 import matplotlib.pyplot as plt
 import csv
 import os
+
 def get_hubmap_edge_index(X, pos, regions, distance_thres, neighborhood_size_thres):
     # construct edge indexes when there is region information
     spatial_edge_list = []
@@ -42,7 +43,7 @@ def get_hubmap_edge_index(X, pos, regions, distance_thres, neighborhood_size_thr
         # edge_weights = torch.concat(edge_weights)
     similarity_edge_list = [[u,v] for (u,v) in zip(src, dst)]
     return spatial_edge_list, similarity_edge_list
-    
+
 def get_tonsilbe_edge_index(X, pos, distance_thres, neighborhood_size_thres):
     # construct spatial edge indexes in one region
     dists = pairwise_distances(pos)
@@ -59,7 +60,8 @@ def get_tonsilbe_edge_index(X, pos, distance_thres, neighborhood_size_thres):
         dst.extend(neighbors)
     similarity_edge_list = [[u, v] for (u, v) in zip(src, dst)]
     return spatial_edge_list, similarity_edge_list
-    
+
+
 def load_hubmap_data(train_df, distance_thres, neighborhood_size_thres, sample_rate):
     # test_df = pd.read_csv(unlabeled_file)
     train_df = train_df.sample(n=round(sample_rate*len(train_df)), random_state=1)
@@ -89,13 +91,11 @@ def load_hubmap_data(train_df, distance_thres, neighborhood_size_thres, sample_r
     return train_X, train_y, labeled_spatial_edges, labeled_similarity_edges, inverse_dict
 
 def load_hubmap_data_CL_SB(df, distance_thres, neighborhood_size_thres, sample_rate = 1):
-    train_df = pd.read_csv(df)
-    test_df = pd.read_csv(df)
+    train_df = df[(df['tissue'] == 'CL')]
+    test_df = df[(df['tissue'] == 'SB')]
     if sample_rate != 1:
         train_df = train_df.sample(n=round(sample_rate*len(train_df)), random_state=1)
         test_df = test_df.sample(n=round(sample_rate*len(test_df)), random_state=1)
-    train_df = train_df[(train_df['tissue'] == 'CL')]
-    test_df = test_df[(test_df['tissue'] == 'SB')]
     train_X = train_df.iloc[:, 1:49].to_numpy() # node features, indexes depend on specific datasets
     train_X = normalize(train_X)
     test_X = test_df.iloc[:, 1:49].to_numpy()
@@ -122,42 +122,6 @@ def load_hubmap_data_CL_SB(df, distance_thres, neighborhood_size_thres, sample_r
     unlabeled_spatial_edges, unlabeled_similarity_edges = get_hubmap_edge_index(test_X, unlabeled_pos, unlabeled_regions, distance_thres, neighborhood_size_thres)
     return train_X, train_y, test_X, test_y, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
 
-def load_hubmap_data_CL_SB_batch_corrected(df, batch_corrected, distance_thres, neighborhood_size_thres, sample_rate = 1):
-    train_df = pd.read_csv(df)
-    test_df = pd.read_csv(df)
-    corrected = pd.read_csv(batch_corrected)
-    if sample_rate != 1:
-        train_df = train_df.sample(n=round(sample_rate*len(train_df)), random_state=1)
-        test_df = test_df.sample(n=round(sample_rate*len(test_df)), random_state=1)
-    train_corrected = corrected[(train_df['tissue'] == 'CL')]
-    test_corrected = corrected[(test_df['tissue'] == 'SB')]
-    train_df = train_df[(train_df['tissue'] == 'CL')]
-    test_df = test_df[(test_df['tissue'] == 'SB')]
-    train_X = train_corrected.iloc[:, 1:49].to_numpy() # node features, indexes depend on specific datasets
-    train_X = normalize(train_X)
-    test_X = test_corrected.iloc[:, 1:49].to_numpy()
-    test_X = normalize(test_X)
-    labeled_pos = train_df.iloc[:, -6:-4].values # x,y coordinates, indexes depend on specific datasets
-    unlabeled_pos = test_df.iloc[:, -6:-4].values
-    labeled_regions = train_df['unique_region']
-    unlabeled_regions = test_df['unique_region']
-    train_y = train_df['cell_type_A'] # class information
-    test_y = test_df['cell_type_A']
-     # Combine cell types from both datasets
-    cell_types_CL = set(train_df['cell_type_A'].values)
-    cell_types_SB = set(test_df['cell_type_A'].values)
-    cell_types = np.sort(list(cell_types_CL.union(cell_types_SB))).tolist()
-    # we here map class in texts to categorical numbers and also save an inverse_dict to map the numbers back to texts
-    cell_type_dict = {}
-    inverse_dict = {}
-    for i, cell_type in enumerate(cell_types):
-        cell_type_dict[cell_type] = i
-        inverse_dict[i] = cell_type
-    train_y = np.array([cell_type_dict[x] for x in train_y])
-    test_y = np.array([cell_type_dict[x] for x in test_y])
-    labeled_spatial_edges, labeled_similarity_edges = get_hubmap_edge_index(train_X, labeled_pos, labeled_regions, distance_thres, neighborhood_size_thres)
-    unlabeled_spatial_edges, unlabeled_similarity_edges = get_hubmap_edge_index(test_X, unlabeled_pos, unlabeled_regions, distance_thres, neighborhood_size_thres)
-    return train_X, train_y, test_X, test_y, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
 def load_tonsilbe_data(df, distance_thres, neighborhood_size_thres, sample_rate):
     train_df = df.loc[df['sample_name'] == 'tonsil']
     train_df = train_df.sample(n=round(sample_rate*len(train_df)), random_state=1)
@@ -181,6 +145,9 @@ def load_tonsilbe_data(df, distance_thres, neighborhood_size_thres, sample_rate)
     labeled_spatial_edges, labeled_similarity_edges = get_tonsilbe_edge_index(train_X, labeled_pos, distance_thres, neighborhood_size_thres)
     unlabeled_spatial_edges, unlabeled_similarity_edges = get_tonsilbe_edge_index(test_X, unlabeled_pos, distance_thres, neighborhood_size_thres)
     return train_X, train_y, test_X, test_y, labeled_spatial_edges, unlabeled_spatial_edges, labeled_similarity_edges, unlabeled_similarity_edges, inverse_dict
+
+
+
 def visualize_predictions(X, predicted_labels, inverse_dict, save_location):
     # Map numerical labels to their string annotations
     predicted_annotations = [inverse_dict[label] for label in predicted_labels]
@@ -213,8 +180,6 @@ def write_result_to_csv(result_path, model_name, threshold_distance, topk, val_l
     with open(os.path.join(result_path, 'result.csv'), 'a', newline='') as csvfile:
         fieldnames = ['Model', 'Threshold_Distance', 'TopK', 'Validation_Loss', 'Validation_Accuracy']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-        writer.writeheader()
         writer.writerow({'Model': model_name, 'Threshold_Distance': threshold_distance, 'TopK': topk, 'Validation_Loss':val_loss, 'Validation_Accuracy': validation_acc})
 
 
