@@ -26,6 +26,10 @@ If you want to run the cross-tissue annotation experiments, please run
    python HAN_CL_SB_training.py
    python RGCN_CL_SB_training.py
    ```
+To reproduce experimental result for intra-region annotation, please run
+   ```
+   python 
+   ```
 3. Please navigate to the working directory and run scripts GTNmodel.py, HANmodel.py, and RGCNmodel.py models to replicate the experimental results. These scripts will run a experiment with $threshold distance =$ {10,20,30,40,50}, and $topk$ = 10 by default. 
    ```
    python GTNmodel.py
