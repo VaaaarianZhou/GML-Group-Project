@@ -21,12 +21,12 @@ The dataset we utilized is from [this website](https://datadryad.org/stash/landi
       ```
       python batch_correction.py B004_training_dryad.csv
       ```
-   If you want to run the cross-tissue annotation experiments, please run
+   If you want to run the **cross-tissue** annotation experiments, please run
       ```
       python HAN_CL_SB_training.py
       python RGCN_CL_SB_training.py
       ```
-   To reproduce experimental result for intra-region annotation, please run
+   To reproduce experimental result for **intra-region** annotation, please run
       ```
       python han_training.py
       python rgcn_training.py
