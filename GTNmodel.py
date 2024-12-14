@@ -83,15 +83,7 @@ class GTLayer(nn.Module):
             Hc = H @ self.weight[c]  # [N, out_channels]
             # Now combine adjacency matrices based on attention
             # att[c] shape: [in_channels, num_A], but we need scalar weights for A selection
-            # Typically, GTN uses a softmax over As. Let's say we do:
-            # For simplicity, here we just sum over input channels dimension by average
-            # In practice, GTN attempts to learn meta-path by multiplying adjacency matrices.
-            # The original GTN code uses a different approach:
-            # It learns a selection of adjacency matrices and multiplies them to form meta-paths.
-            # Due to complexity, we show a simplified version here.
 
-            # A simplified GTN might just learn a convex combination of As:
-            # Flatten the att for channel c to get a distribution over As.
             att_c = att[c].mean(dim=0)  # [num_A]
             score = F.softmax(att_c, dim=0)  # distribution over As
 
