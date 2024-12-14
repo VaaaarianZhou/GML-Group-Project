@@ -15,7 +15,6 @@ The dataset we utilized is from [this website](https://datadryad.org/stash/landi
    ```
    sbatch HANmodel_training.job
    sbatch RGCNmodel_training.job
-   sbatch GTNmodel_training.job
    ```
    (optional) We utilized scanorama method for batch correction between different tissue regions. To obtain corrected expression matrix for training and evaluation, please run  
       ```
