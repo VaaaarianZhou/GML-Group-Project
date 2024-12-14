@@ -21,7 +21,8 @@ The dataset we utilized is from [this website](https://datadryad.org/stash/landi
       ```
       python batch_correction.py B004_training_dryad.csv
       ```
-   If you want to run the **cross-tissue** annotation experiments, please run
+3. Please navigate to the working directory and run scripts GTNmodel.py, HANmodel.py, and RGCNmodel.py models to replicate the experimental results. These scripts will run a experiment with $threshold distance =$ {10,20,30,40,50}, and $topk$ = 10 by default. 
+    If you want to run the **cross-tissue** annotation experiments, please run
       ```
       python HAN_CL_SB_training.py
       python RGCN_CL_SB_training.py
@@ -31,14 +32,6 @@ The dataset we utilized is from [this website](https://datadryad.org/stash/landi
       python han_training.py
       python rgcn_training.py
       ```
-3. Please navigate to the working directory and run scripts GTNmodel.py, HANmodel.py, and RGCNmodel.py models to replicate the experimental results. These scripts will run a experiment with $threshold distance =$ {10,20,30,40,50}, and $topk$ = 10 by default. 
-   ```
-   python GTNmodel.py
-   python HANmodel.py
-   python RGCNmodel.py
-   ```
-   Please be reminded that the script was designed to run in a computing cluster, and the $topk$ value (default = 10) is bound to the environmental variable **SLURM_ARRAY_TASK_ID**, which is default to 0 if not found. If you want to change the $topk$ value, you can ignore the **SLURM_ARRAY_TASK_ID** and set it manually.
-
 ## View Results
 4. Please check /result/result.csv for the experimental result in csv format. The scripts will also store the model parameters in a directory named **model** under the working directory.
 
