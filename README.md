@@ -17,6 +17,10 @@ The dataset we utilized is from [this website](https://datadryad.org/stash/landi
    sbatch RGCNmodel_training.job
    sbatch GTNmodel_training.job
    ```
+To run the cross-tissue annotation experiments, please run
+```
+   sbatch HAN
+```
 (optional) We utilized scanorama method for batch correction between different tissue regions. To obtain corrected expression matrix for training and evaluation, please run  
    ```
    python batch_correction.py B004_training_dryad.csv
