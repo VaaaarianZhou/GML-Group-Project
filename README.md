@@ -22,10 +22,10 @@ The dataset we utilized is from [this website](https://datadryad.org/stash/landi
    python batch_correction.py B004_training_dryad.csv
    ```
 If you want to run the cross-tissue annotation experiments, please run
-```
+   ```
    python HAN_CL_SB_training.py
    python RGCN_CL_SB_training.py
-```
+   ```
 3. Please navigate to the working directory and run scripts GTNmodel.py, HANmodel.py, and RGCNmodel.py models to replicate the experimental results. These scripts will run a experiment with $threshold distance =$ {10,20,30,40,50}, and $topk$ = 10 by default. 
    ```
    python GTNmodel.py
